@@ -49,7 +49,12 @@ DIST_DIR = PROJECT_ROOT / "dist"
 DIST_ASSETS_DIR = DIST_DIR / "assets"
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
-    "http://127.0.0.1:3000",\n    "http://localhost:5173",\n    "http://127.0.0.1:5173",\n    "https://*.vercel.app",\n]
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://*.vercel.app",
+]
+
 
 app = FastAPI(title="Path-ai Verify API")
 
@@ -284,3 +289,4 @@ if DIST_DIR.exists():
         if requested_path.is_file():
             return FileResponse(requested_path)
         return FileResponse(DIST_DIR / "index.html")
+
