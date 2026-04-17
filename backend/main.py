@@ -1,21 +1,20 @@
 """
-FastAPI service for extracting clean text from resume files.
+FastAPI service for Path-ai Verify.
 
-Install dependencies:
-    pip install -r requirements.txt
-
-Start the server from the backend directory:
-    uvicorn main:app --reload
+Local development:
+    python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
@@ -23,19 +22,19 @@ try:
     from backend.parser.pdf_parser import extract_text_from_pdf
     from backend.parser.resume_parser import normalize_resume_text, parse_resume_text
     from backend.scorer.scoring import score_verification
+    from backend.scoring.scorer import score_resume_text
     from backend.signals.consistency_signal import compute_consistency_signal
     from backend.signals.depth_signal import compute_depth_signal
     from backend.signals.skill_signal import compute_skill_signal
-    from backend.scoring.scorer import score_resume_text
 except ImportError:
     from parser.docx_parser import extract_text_from_docx
     from parser.pdf_parser import extract_text_from_pdf
     from parser.resume_parser import normalize_resume_text, parse_resume_text
     from scorer.scoring import score_verification
+    from scoring.scorer import score_resume_text
     from signals.consistency_signal import compute_consistency_signal
     from signals.depth_signal import compute_depth_signal
     from signals.skill_signal import compute_skill_signal
-    from scoring.scorer import score_resume_text
 
 
 logging.basicConfig(
@@ -44,16 +43,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DIST_DIR = PROJECT_ROOT / "dist"
+DIST_ASSETS_DIR = DIST_DIR / "assets"
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
 app = FastAPI(title="Path-ai Verify API")
+
+
+def _get_allowed_origins() -> list[str]:
+    raw_origins = os.getenv("CORS_ORIGINS", "")
+    configured = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return configured or DEFAULT_CORS_ORIGINS
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,12 +91,10 @@ class VerifyRequest(BaseModel):
 
 
 def clean_text(text: str) -> str:
-    """Normalize extracted text while keeping readable line structure."""
     return normalize_resume_text(text)
 
 
 def detect_file_kind(filename: str, content_type: str | None) -> str:
-    """Validate file type using both extension and content type."""
     suffix = Path(filename).suffix.lower()
     normalized_content_type = (content_type or "").lower()
 
@@ -101,15 +111,13 @@ def detect_file_kind(filename: str, content_type: str | None) -> str:
 
 
 def validate_file_signature(file_kind: str, file_bytes: bytes) -> None:
-    """Basic content sniffing to reject obviously spoofed uploads."""
     if file_kind == "pdf":
         if not file_bytes.startswith(b"%PDF"):
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid PDF.")
         return
 
-    if file_kind == "docx":
-        if not file_bytes.startswith(b"PK"):
-            raise HTTPException(status_code=400, detail="Uploaded file is not a valid DOCX.")
+    if file_kind == "docx" and not file_bytes.startswith(b"PK"):
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid DOCX.")
 
 
 async def read_uploaded_file(upload: UploadFile) -> bytes:
@@ -142,20 +150,10 @@ def _build_claims(parsed_resume: dict) -> list[dict[str, object]]:
         )
 
     if parsed_resume["years_experience"] is not None:
-        claims.append(
-            {
-                "type": "experience",
-                "value": f'{parsed_resume["years_experience"]} years',
-            }
-        )
+        claims.append({"type": "experience", "value": f'{parsed_resume["years_experience"]} years'})
 
     if parsed_resume["has_senior_title"]:
-        claims.append(
-            {
-                "type": "title",
-                "value": "Senior-level title detected",
-            }
-        )
+        claims.append({"type": "title", "value": "Senior-level title detected"})
 
     return claims
 
@@ -163,7 +161,10 @@ def _build_claims(parsed_resume: dict) -> list[dict[str, object]]:
 def _build_verify_response(parsed_resume: dict, verification_result: dict) -> dict:
     confidence = int(verification_result["confidence"])
     risk_score = max(0, min(100, 100 - confidence))
-    findings = [{"message": flag, "severity": verification_result["risk"].lower()} for flag in verification_result["flags"]]
+    findings = [
+        {"message": flag, "severity": verification_result["risk"].lower()}
+        for flag in verification_result["flags"]
+    ]
 
     if not findings:
         findings.append(
@@ -188,6 +189,11 @@ def _build_verify_response(parsed_resume: dict, verification_result: dict) -> di
         "claims": _build_claims(parsed_resume),
         "timeline": parsed_resume["timeline"],
     }
+
+
+@app.get("/health")
+async def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.post("/extract-text")
@@ -262,3 +268,22 @@ async def verify_resume(payload: VerifyRequest) -> JSONResponse:
         bool(payload.linkedin and payload.linkedin.strip()),
     )
     return JSONResponse(content=_build_verify_response(parsed_resume, result))
+
+
+if DIST_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=DIST_ASSETS_DIR), name="assets")
+
+
+if DIST_DIR.exists():
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index() -> FileResponse:
+        return FileResponse(DIST_DIR / "index.html")
+
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> FileResponse:
+        requested_path = DIST_DIR / full_path
+        if requested_path.is_file():
+            return FileResponse(requested_path)
+        return FileResponse(DIST_DIR / "index.html")
