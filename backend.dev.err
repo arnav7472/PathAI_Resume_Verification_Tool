@@ -1,0 +1,10 @@
+INFO:     Started server process [20856]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-04-17 15:43:08,074 INFO [backend.main] Processed pdf file: jordan_kim_resume.pdf
+2026-04-17 15:43:08,093 INFO [backend.main] Verified resume: confidence=46 risk=Medium github=False linkedin=False
+2026-04-17 15:44:01,474 INFO [backend.main] Processed pdf file: priya_nair_resume.pdf
+2026-04-17 15:44:01,486 INFO [backend.main] Verified resume: confidence=66 risk=Medium github=False linkedin=False
+2026-04-17 15:45:04,083 INFO [backend.main] Processed pdf file: alex_rivera_resume.pdf
+2026-04-17 15:45:04,097 INFO [backend.main] Verified resume: confidence=64 risk=Medium github=False linkedin=False

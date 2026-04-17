@@ -1,0 +1,12 @@
+INFO:     127.0.0.1:49200 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49201 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:47611 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:47612 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61786 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61786 - "OPTIONS /verify HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61786 - "POST /verify HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61801 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61801 - "POST /verify HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28124 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28124 - "OPTIONS /verify HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28124 - "POST /verify HTTP/1.1" 200 OK

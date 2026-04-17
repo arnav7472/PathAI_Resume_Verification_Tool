@@ -49,6 +49,30 @@ def _format_skill_label(skill: str) -> str:
     return " ".join(part.capitalize() for part in skill.split())
 
 
+def _extract_timeline_ranges(text: str) -> list[dict[str, int]]:
+    matches = re.findall(r"\b(19|20)\d{2}\s*[-–]\s*((?:19|20)\d{2}|present)\b", text, flags=re.IGNORECASE)
+    timeline: list[dict[str, int]] = []
+
+    for start_prefix, end_value in matches:
+        full_match = re.search(
+            rf"\b({start_prefix}\d{{2}})\s*[-–]\s*({re.escape(end_value)})\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not full_match:
+            continue
+
+        start_year = int(full_match.group(1))
+        end_raw = full_match.group(2).lower()
+        item: dict[str, int | str] = {
+            "start_year": start_year,
+            "end_year": end_raw if end_raw == "present" else int(end_raw),
+        }
+        timeline.append(item)  # type: ignore[arg-type]
+
+    return timeline
+
+
 def parse_resume_text(raw_text: str) -> dict:
     normalized_text = normalize_resume_text(raw_text)
 
@@ -67,5 +91,6 @@ def parse_resume_text(raw_text: str) -> dict:
         "skill_counts": skill_counts,
         "years_experience": _extract_years_experience(normalized_text),
         "has_senior_title": has_senior_title,
+        "timeline": _extract_timeline_ranges(normalized_text),
         "text": normalized_text,
     }

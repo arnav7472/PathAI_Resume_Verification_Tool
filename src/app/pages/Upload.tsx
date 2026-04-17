@@ -14,8 +14,6 @@ export function Upload() {
   const [formData, setFormData] = useState({
     name: '',
     role: '',
-    linkedin: '',
-    github: '',
     description: ''
   });
 
@@ -28,8 +26,8 @@ export function Upload() {
 
   const startScan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file && !formData.name) {
-      toast.error('Candidate name or Resume is required');
+    if (!file && !formData.description.trim()) {
+      toast.error('Resume file or pasted text is required');
       return;
     }
 
@@ -39,13 +37,12 @@ export function Upload() {
         name: formData.name,
         role: formData.role,
         file: file,
-        linkedin: formData.linkedin,
-        github: formData.github
+        text: formData.description
       });
       toast.success('Verification complete');
       navigate('/summary');
     } catch (error) {
-      toast.error('Verification failed. Try again.');
+      toast.error('Unable to analyze resume right now.');
     } finally {
       setLoading(false);
     }
@@ -98,27 +95,15 @@ export function Upload() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-slate-600">LinkedIn URL</label>
-            <input 
-              type="url" 
-              value={formData.linkedin}
-              onChange={(e) => setFormData({...formData, linkedin: e.target.value})}
-              placeholder="Optional" 
-              className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none text-white" 
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-slate-600">GitHub URL</label>
-            <input 
-              type="url" 
-              value={formData.github}
-              onChange={(e) => setFormData({...formData, github: e.target.value})}
-              placeholder="Optional" 
-              className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none text-white" 
-            />
-          </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase font-bold text-slate-600">Paste Resume Text</label>
+          <textarea
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Optional if you upload a file. Paste resume text here to analyze directly."
+            className="min-h-40 w-full resize-y bg-slate-900 border border-slate-800 rounded px-3 py-3 text-sm focus:border-indigo-500 outline-none text-white"
+          />
+          <p className="text-[11px] text-slate-600">Upload a file or paste text. If both are provided, pasted text is used first.</p>
         </div>
 
         <button 
@@ -129,7 +114,7 @@ export function Upload() {
           {loading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Analyzing Signals...
+              Analyzing resume...
             </>
           ) : 'Run Verification Scan'}
         </button>

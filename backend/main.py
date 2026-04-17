@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -43,7 +44,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Resume Text Extraction Service")
+app = FastAPI(title="Path-ai Verify API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 PDF_CONTENT_TYPES = {"application/pdf"}
@@ -113,6 +127,67 @@ def ensure_extracted_text(cleaned_text: str) -> None:
             status_code=422,
             detail="No extractable text found in the uploaded file.",
         )
+
+
+def _build_claims(parsed_resume: dict) -> list[dict[str, object]]:
+    claims: list[dict[str, object]] = []
+
+    for skill, count in parsed_resume["skill_counts"].items():
+        claims.append(
+            {
+                "type": "skill",
+                "value": " ".join(part.capitalize() for part in skill.split()),
+                "evidence_count": count,
+            }
+        )
+
+    if parsed_resume["years_experience"] is not None:
+        claims.append(
+            {
+                "type": "experience",
+                "value": f'{parsed_resume["years_experience"]} years',
+            }
+        )
+
+    if parsed_resume["has_senior_title"]:
+        claims.append(
+            {
+                "type": "title",
+                "value": "Senior-level title detected",
+            }
+        )
+
+    return claims
+
+
+def _build_verify_response(parsed_resume: dict, verification_result: dict) -> dict:
+    confidence = int(verification_result["confidence"])
+    risk_score = max(0, min(100, 100 - confidence))
+    findings = [{"message": flag, "severity": verification_result["risk"].lower()} for flag in verification_result["flags"]]
+
+    if not findings:
+        findings.append(
+            {
+                "message": "No major heuristic contradictions detected.",
+                "severity": "low",
+            }
+        )
+
+    if risk_score >= 60:
+        verdict = "high_risk"
+    elif risk_score >= 30:
+        verdict = "needs_review"
+    else:
+        verdict = "likely_consistent"
+
+    return {
+        "risk_score": risk_score,
+        "confidence": confidence,
+        "verdict": verdict,
+        "findings": findings,
+        "claims": _build_claims(parsed_resume),
+        "timeline": parsed_resume["timeline"],
+    }
 
 
 @app.post("/extract-text")
@@ -186,4 +261,4 @@ async def verify_resume(payload: VerifyRequest) -> JSONResponse:
         bool(payload.github and payload.github.strip()),
         bool(payload.linkedin and payload.linkedin.strip()),
     )
-    return JSONResponse(content=result)
+    return JSONResponse(content=_build_verify_response(parsed_resume, result))
