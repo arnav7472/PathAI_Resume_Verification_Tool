@@ -22,7 +22,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt --no-deps
 
 COPY backend ./backend
 COPY --from=frontend-builder /app/dist ./dist
