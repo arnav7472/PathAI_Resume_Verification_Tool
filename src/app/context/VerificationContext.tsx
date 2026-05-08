@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '');
+// API_BASE_URL: Use env var if set, else dev fallback, else same-origin (relative path)
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    // Remove trailing slash if present
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
+  }
+  if (import.meta.env.DEV) {
+    return 'http://127.0.0.1:8000';
+  }
+  // Production + no env var? Use relative path (works when backend serves frontend)
+  return '';
+};
+const API_BASE_URL = getApiBaseUrl();
 
 export type Finding = {
   message: string;
@@ -127,10 +139,11 @@ async function extractResumeText(file: File): Promise<string> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE_URL}/extract-text`, {
-    method: 'POST',
-    body: formData,
-  });
+
+
+  const endpoint = API_BASE_URL ? `${API_BASE_URL}/extract-text` : '/extract-text';
+  const response = await fetch(endpoint, { method: 'POST',
+    body: formData, });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -146,11 +159,12 @@ async function extractResumeText(file: File): Promise<string> {
 }
 
 async function verifyResumeText(text: string) {
-  const response = await fetch(`${API_BASE_URL}/verify`, {
-    method: 'POST',
+
+
+  const endpoint = API_BASE_URL ? `${API_BASE_URL}/verify` : '/verify';
+  const response = await fetch(endpoint, {     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
+    body: JSON.stringify({ text }), });
 
   if (!response.ok) {
     const errorText = await response.text();
