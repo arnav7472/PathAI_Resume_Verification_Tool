@@ -3,7 +3,24 @@ from __future__ import annotations
 import re
 
 
-ACTION_VERBS = ["built", "developed", "designed", "deployed", "optimized", "implemented"]
+ACTION_VERBS = [
+    "analyzed",
+    "automated",
+    "built",
+    "collaborated",
+    "configured",
+    "created",
+    "deployed",
+    "designed",
+    "developed",
+    "engineered",
+    "implemented",
+    "improved",
+    "maintained",
+    "managed",
+    "optimized",
+    "secured",
+]
 CONTEXT_TERMS = ["project", "system", "pipeline", "application", "api"]
 
 

@@ -18,7 +18,7 @@ export function Reports() {
     if (!normalizedQ) return history;
 
     return history.filter((r) => {
-      const haystack = `${r.candidateName} ${r.role} ${r.id} ${r.date}`.toLowerCase();
+      const haystack = `${r.candidateName} ${r.jobDescription} ${r.id} ${r.date}`.toLowerCase();
       return haystack.includes(normalizedQ);
     });
   }, [history, normalizedQ]);
@@ -51,23 +51,23 @@ export function Reports() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center gap-3">
-        <h1 className="text-xl font-bold text-white">History</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Reports</h1>
 
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-600" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search candidates…"
             value={query}
             onChange={(e) => onChangeQuery(e.target.value)}
-            className="bg-slate-900 border border-slate-800 rounded px-8 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500"
+            className="bg-secondary/60 border border-border rounded-lg px-8 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-electric-blue/40"
             aria-label="Search report history"
           />
           {query.trim().length > 0 && (
             <button
               type="button"
               onClick={clearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500 hover:text-slate-200"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground hover:text-foreground"
               aria-label="Clear search"
             >
               Clear
@@ -77,35 +77,35 @@ export function Reports() {
       </div>
 
       {history.length === 0 ? (
-        <div className="h-64 flex flex-col items-center justify-center border border-slate-900 rounded bg-slate-900/10 text-slate-500 text-sm">
+        <div className="glass-card h-64 flex flex-col items-center justify-center border border-border rounded-xl text-muted-foreground text-sm">
           No history available. Run a scan to see it here.
         </div>
       ) : (
-        <div className="border border-slate-900 rounded overflow-hidden">
+        <div className="glass-card border border-border rounded-xl overflow-hidden">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-900/50 text-[10px] uppercase font-bold text-slate-500">
+            <thead className="bg-secondary/40 text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
               <tr>
                 <th className="px-6 py-4">Candidate</th>
-                <th className="px-6 py-4">Role</th>
+                <th className="px-6 py-4">Job Description</th>
                 <th className="px-6 py-4">Date</th>
                 <th className="px-6 py-4 text-right">Confidence</th>
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-slate-900 text-slate-400">
+            <tbody className="divide-y divide-border text-muted-foreground">
               {filteredHistory.map((r) => (
                 <tr
                   key={r.id}
-                  className="hover:bg-slate-900/20 cursor-pointer transition-colors group"
+                  className="hover:bg-secondary/60 cursor-pointer transition-colors group"
                   onClick={() => handleViewReport(r)}
                 >
                   <td className="px-6 py-4">
-                    <div className="text-white font-medium group-hover:text-indigo-400 transition-colors">
+                    <div className="text-foreground font-medium group-hover:text-electric-blue transition-colors">
                       {r.candidateName}
                     </div>
-                    <div className="text-[10px] text-slate-600">{r.id}</div>
+                    <div className="text-[10px] text-muted-foreground">{r.id}</div>
                   </td>
-                  <td className="px-6 py-4">{r.role}</td>
+                  <td className="px-6 py-4 max-w-xs truncate">{r.jobDescription || 'No JD saved'}</td>
                   <td className="px-6 py-4">{r.date}</td>
                   <td
                     className={`px-6 py-4 text-right font-bold ${
@@ -124,21 +124,21 @@ export function Reports() {
               {filteredHistory.length === 0 && (
                 <tr>
                   <td className="px-6 py-8" colSpan={4}>
-                    <div className="text-sm text-slate-400">
+                    <div className="text-sm text-muted-foreground">
                       No results for{" "}
-                      <span className="text-white font-semibold">
+                      <span className="text-foreground font-semibold">
                         "{query.trim()}"
                       </span>
                       .
                     </div>
-                    <div className="text-xs text-slate-600 mt-1">
-                      Try a different name, role, ID, or date.
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Try a different name, job description keyword, ID, or date.
                     </div>
                     <div className="mt-3">
                       <button
                         type="button"
                         onClick={clearSearch}
-                        className="px-3 py-2 text-xs font-bold rounded border border-slate-800 bg-black/30 text-slate-200 hover:bg-black/40"
+                        className="px-3 py-2 text-xs font-semibold rounded border border-border bg-secondary/70 text-foreground hover:bg-secondary"
                       >
                         Clear search
                       </button>

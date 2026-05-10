@@ -33,9 +33,9 @@ export function Skills() {
 
   if (!currentScan) {
     return (
-      <div className="h-64 flex flex-col items-center justify-center border border-slate-900 rounded bg-slate-900/10">
-        <p className="text-slate-500 text-sm mb-4">No active scan results found.</p>
-        <Link to="/" className="text-xs font-bold text-indigo-400 hover:underline">
+      <div className="glass-card h-64 flex flex-col items-center justify-center border border-border rounded-xl">
+        <p className="text-muted-foreground text-sm mb-4">No active scan results found.</p>
+        <Link to="/" className="text-xs font-semibold text-electric-blue hover:underline">
           Run your first scan
         </Link>
       </div>
@@ -71,12 +71,12 @@ export function Skills() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Claims Breakdown</h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Search extracted claims only. Try:{" "}
-            <span className="text-slate-400">"kubernetes"</span>,{" "}
-            <span className="text-slate-400">"experience"</span>,{" "}
-            <span className="text-slate-400">"verified"</span>.
+          <h1 className="text-2xl font-semibold text-foreground">Claims Breakdown</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Search extracted skills and claims. Try:{" "}
+            <span className="text-foreground">"kubernetes"</span>,{" "}
+            <span className="text-foreground">"experience"</span>,{" "}
+            <span className="text-foreground">"verified"</span>.
           </p>
         </div>
 
@@ -84,15 +84,15 @@ export function Skills() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder='Search claims (e.g. "python", "experience")'
-            className="w-full sm:w-80 bg-black/40 border border-slate-900 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-            aria-label="Search claims"
+            placeholder='Search skills or claims (e.g. "python", "docker")'
+            className="w-full sm:w-80 bg-secondary/70 border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-electric-blue/30"
+            aria-label="Search skills and claims"
           />
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="bg-black/40 border border-slate-900 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="bg-secondary/70 border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-electric-blue/30"
             aria-label="Filter by status"
           >
             <option value="All">All statuses</option>
@@ -105,21 +105,21 @@ export function Skills() {
       </div>
 
       {hasNoResults && hasActiveFilters && (
-        <div className="border border-slate-900 rounded bg-slate-900/10 p-5">
-          <div className="text-sm text-slate-300">
+        <div className="glass-card border border-border rounded-xl p-5">
+          <div className="text-sm text-foreground">
             No results for{" "}
             <span className="text-white font-semibold">"{query.trim()}"</span>.
           </div>
-          <div className="text-xs text-slate-600 mt-1">
+          <div className="text-xs text-muted-foreground mt-1">
             This page searches extracted claims only. If you meant candidate names or report IDs, search in{" "}
-            <span className="text-slate-400">Reports</span>.
+            <span className="text-foreground">Reports</span>.
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={clearFilters}
-              className="px-3 py-2 text-xs font-bold rounded border border-slate-800 bg-black/30 text-slate-200 hover:bg-black/40"
+              className="px-3 py-2 text-xs font-semibold rounded border border-border bg-secondary/70 text-foreground hover:bg-secondary"
             >
               Clear filters
             </button>
@@ -128,7 +128,7 @@ export function Skills() {
               type="button"
               onClick={goReportsWithQuery}
               disabled={!query.trim()}
-              className="px-3 py-2 text-xs font-bold rounded bg-indigo-500 text-black hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-2 text-xs font-semibold rounded bg-electric-blue text-background hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Search in Reports
             </button>
@@ -136,9 +136,21 @@ export function Skills() {
         </div>
       )}
 
-      <div className="border border-slate-900 rounded overflow-hidden">
+      <div className="glass-card border border-border rounded-xl overflow-hidden">
+        {currentScan.skills.length > 0 && (
+          <div className="border-b border-border bg-secondary/40 px-6 py-4">
+            <p className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-3">Extracted Skills</p>
+            <div className="flex flex-wrap gap-2">
+              {currentScan.skills.map((skill) => (
+                <span key={skill} className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-900/50 text-[10px] uppercase font-bold text-slate-500">
+          <thead className="bg-secondary/40 text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
             <tr>
               <th className="px-6 py-4">Claim</th>
               <th className="px-6 py-4">Evidence</th>
@@ -147,24 +159,24 @@ export function Skills() {
             </tr>
           </thead>
 
-          <tbody className="divide-y divide-slate-900">
+          <tbody className="divide-y divide-border">
             {filteredSkills.map((skill, i) => {
               const pct = clampPct(skill.conf);
 
               return (
-                <tr key={`${skill.name}-${skill.category}-${i}`} className="hover:bg-slate-900/20">
+                <tr key={`${skill.name}-${skill.category}-${i}`} className="hover:bg-secondary/50">
                   <td className="px-6 py-4">
-                    <div className="text-white font-medium">{skill.name}</div>
-                    <div className="text-[10px] text-slate-500">{skill.category}</div>
+                    <div className="text-foreground font-medium">{skill.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{skill.category}</div>
                   </td>
 
-                  <td className="px-6 py-4 text-slate-400">{skill.claimed}</td>
+                  <td className="px-6 py-4 text-muted-foreground">{skill.claimed}</td>
 
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-white font-bold">{pct}%</span>
-                      <div className="w-16 h-1 bg-slate-900 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500" style={{ width: `${pct}%` }} />
+                      <span className="text-foreground font-bold">{pct}%</span>
+                      <div className="w-16 h-1 bg-secondary rounded-full overflow-hidden">
+                        <div className="h-full bg-electric-blue" style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   </td>
@@ -181,9 +193,9 @@ export function Skills() {
             {filteredSkills.length === 0 && (
               <tr>
                 <td className="px-6 py-8" colSpan={4}>
-                  <div className="text-sm text-slate-400">No claims to display.</div>
-                  <div className="text-xs text-slate-600 mt-1">
-                    {hasActiveFilters ? "Try a different keyword or reset the status filter." : "This scan contains zero extracted claims."}
+                  <div className="text-sm text-muted-foreground">No skills or claims to display.</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {hasActiveFilters ? "Try a different keyword or reset the status filter." : "This scan contains zero extracted skills or claims."}
                   </div>
                 </td>
               </tr>
@@ -194,13 +206,13 @@ export function Skills() {
 
       <div className="space-y-4 pt-6">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-xs uppercase font-bold text-slate-500">Claim Context</h2>
+          <h2 className="text-xs uppercase font-bold tracking-widest text-muted-foreground">Claim Context</h2>
 
           {hasActiveFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="text-[11px] font-bold text-slate-400 hover:text-slate-200"
+              className="text-[11px] font-bold text-muted-foreground hover:text-foreground"
             >
               Reset
             </button>
@@ -209,16 +221,16 @@ export function Skills() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredSkills.map((skill, i) => (
-            <div key={`${skill.name}-ctx-${i}`} className="p-4 bg-slate-900/20 border border-slate-900 rounded">
-              <p className="text-xs font-bold text-white mb-1">{skill.name}</p>
-              <p className="text-xs text-slate-500 leading-relaxed italic">"{skill.reason}"</p>
+            <div key={`${skill.name}-ctx-${i}`} className="glass-card p-4 border border-border rounded-xl">
+              <p className="text-xs font-bold text-foreground mb-1">{skill.name}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed italic">"{skill.reason}"</p>
             </div>
           ))}
 
           {filteredSkills.length === 0 && (
-            <div className="p-4 bg-slate-900/10 border border-slate-900 rounded">
-              <p className="text-xs font-bold text-white mb-1">No context</p>
-              <p className="text-xs text-slate-500 leading-relaxed">
+            <div className="glass-card p-4 border border-border rounded-xl">
+              <p className="text-xs font-bold text-foreground mb-1">No context</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 There are no matching claims to show context for.
               </p>
             </div>

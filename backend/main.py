@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
+    from backend.analysis_engine import analyze_resume
     from backend.parser.docx_parser import extract_text_from_docx
     from backend.parser.pdf_parser import extract_text_from_pdf
     from backend.parser.resume_parser import normalize_resume_text, parse_resume_text
@@ -27,6 +28,7 @@ try:
     from backend.signals.depth_signal import compute_depth_signal
     from backend.signals.skill_signal import compute_skill_signal
 except ImportError:
+    from analysis_engine import analyze_resume
     from parser.docx_parser import extract_text_from_docx
     from parser.pdf_parser import extract_text_from_pdf
     from parser.resume_parser import normalize_resume_text, parse_resume_text
@@ -84,10 +86,16 @@ GENERIC_BINARY_CONTENT_TYPES = {"application/octet-stream", ""}
 
 class ResumeTextRequest(BaseModel):
     text: str = Field(..., min_length=1)
+    job_description: str | None = Field(default=None, max_length=100_000)
+    strictness: str = Field(default="medium", pattern="^(low|medium|high)$")
+    cross_reference_sync: bool = True
 
 
 class VerifyRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=200_000)
+    job_description: str | None = Field(default=None, max_length=100_000)
+    strictness: str = Field(default="medium", pattern="^(low|medium|high)$")
+    cross_reference_sync: bool = True
     github: str | None = Field(default=None, max_length=500)
     linkedin: str | None = Field(default=None, max_length=500)
 
@@ -235,6 +243,20 @@ async def score_resume(payload: ResumeTextRequest) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Resume text must not be empty.")
 
     result = score_resume_text(cleaned_text)
+    analysis = analyze_resume(
+        cleaned_text,
+        payload.job_description or "",
+        payload.strictness,
+        payload.cross_reference_sync,
+    )
+    result.update(
+        {
+            "compatibility_score": analysis["compatibility_score"],
+            "missing_skills": analysis["missing_skills"],
+            "matched_skills": analysis["matched_skills"],
+            "action_verbs": analysis["action_verbs"],
+        }
+    )
     logger.info("Scored resume text with confidence %.2f", result["confidence"])
     return JSONResponse(content=result)
 
@@ -245,6 +267,51 @@ async def verify_resume(payload: VerifyRequest) -> JSONResponse:
     if not cleaned_text:
         raise HTTPException(status_code=400, detail="Resume text must not be empty.")
 
+    analysis = analyze_resume(
+        cleaned_text,
+        payload.job_description or "",
+        payload.strictness,
+        payload.cross_reference_sync,
+    )
+    verdict = (
+        "high_risk"
+        if analysis["risk_score"] >= 70
+        else "needs_review"
+        if analysis["risk_score"] >= 35
+        else "likely_consistent"
+    )
+    logger.info(
+        "Verified resume with JD: compatibility=%s confidence=%s risk=%s strictness=%s cross_reference=%s",
+        analysis["compatibility_score"],
+        analysis["confidence"],
+        analysis["risk_score"],
+        analysis["strictness"],
+        analysis["cross_reference_sync"],
+    )
+    return JSONResponse(
+        content={
+            "risk_score": analysis["risk_score"],
+            "confidence": analysis["confidence"],
+            "compatibility_score": analysis["compatibility_score"],
+            "verdict": verdict,
+            "findings": analysis["findings"],
+            "claims": analysis["claims"],
+            "evidence": analysis["evidence"],
+            "timeline": analysis["timeline"],
+            "skills": analysis["skills"],
+            "action_verbs": analysis["action_verbs"],
+            "matched_skills": analysis["matched_skills"],
+            "missing_skills": analysis["missing_skills"],
+            "weak_areas": analysis["weak_areas"],
+            "job_requirements": analysis["job_requirements"],
+            "consistency_findings": analysis["consistency_findings"],
+            "strictness": analysis["strictness"],
+            "cross_reference_sync": analysis["cross_reference_sync"],
+        }
+    )
+
+    # Legacy signal path kept below for compatibility reference; the endpoint
+    # returns from the richer JD-aware analysis above.
     parsed_resume = parse_resume_text(cleaned_text)
     skill_signal = compute_skill_signal(parsed_resume["skill_counts"])
     depth_signal = compute_depth_signal(parsed_resume["text"], parsed_resume["skill_counts"])
@@ -289,4 +356,3 @@ if DIST_DIR.exists():
         if requested_path.is_file():
             return FileResponse(requested_path)
         return FileResponse(DIST_DIR / "index.html")
-
