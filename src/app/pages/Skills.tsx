@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { useVerification, type ClaimView } from "../context/VerificationContext";
+import { useVerification, type ClaimView, type EvidenceLevel } from "../context/VerificationContext";
 
 type SkillStatus = "Verified" | "Inflated" | "Buzzword" | "Likely";
-type StatusFilter = "All" | SkillStatus;
+type StatusFilter = "All" | SkillStatus | EvidenceLevel;
 
 function statusBadgeClasses(status: SkillStatus) {
   switch (status) {
@@ -47,9 +47,13 @@ export function Skills() {
 
   const filteredSkills = useMemo(() => {
     return skills.filter((skill) => {
-      const haystack = `${skill.name} ${skill.category} ${skill.claimed} ${skill.status} ${skill.reason}`.toLowerCase();
+      const haystack = `${skill.name} ${skill.category} ${skill.claimed} ${skill.status} ${skill.reason} ${skill.evidenceLevel ?? ""}`.toLowerCase();
       const matchesText = !normalizedQ || haystack.includes(normalizedQ);
-      const matchesStatus = statusFilter === "All" || skill.status === statusFilter;
+      const ev = skill.evidenceLevel?.toLowerCase() ?? "";
+      const matchesStatus =
+        statusFilter === "All" ||
+        skill.status === statusFilter ||
+        (ev && statusFilter.toLowerCase() === ev);
       return matchesText && matchesStatus;
     });
   }, [skills, normalizedQ, statusFilter]);
@@ -96,10 +100,19 @@ export function Skills() {
             aria-label="Filter by status"
           >
             <option value="All">All statuses</option>
-            <option value="Verified">Verified</option>
-            <option value="Inflated">Inflated</option>
-            <option value="Buzzword">Buzzword</option>
-            <option value="Likely">Likely</option>
+            <optgroup label="Summary band (legacy)">
+              <option value="Verified">Verified</option>
+              <option value="Inflated">Inflated</option>
+              <option value="Buzzword">Buzzword</option>
+              <option value="Likely">Likely</option>
+            </optgroup>
+            <optgroup label="Evidence tier">
+              <option value="demonstrated">Demonstrated</option>
+              <option value="supported">Supported</option>
+              <option value="mentioned">Mentioned</option>
+              <option value="weak">Weak</option>
+              <option value="missing">Missing</option>
+            </optgroup>
           </select>
         </div>
       </div>
@@ -155,7 +168,7 @@ export function Skills() {
               <th className="px-6 py-4">Claim</th>
               <th className="px-6 py-4">Evidence</th>
               <th className="px-6 py-4">Confidence</th>
-              <th className="px-6 py-4">Status</th>
+              <th className="px-6 py-4">Tier / Status</th>
             </tr>
           </thead>
 
@@ -182,9 +195,16 @@ export function Skills() {
                   </td>
 
                   <td className="px-6 py-4">
-                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${statusBadgeClasses(skill.status)}`}>
-                      {skill.status}
-                    </span>
+                    <div className="flex flex-col gap-1 items-start">
+                      {skill.evidenceLevel && (
+                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-border text-foreground/90">
+                          {String(skill.evidenceLevel)}
+                        </span>
+                      )}
+                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${statusBadgeClasses(skill.status)}`}>
+                        {skill.status}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               );

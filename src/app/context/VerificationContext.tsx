@@ -19,14 +19,22 @@ export type Finding = {
   severity: 'high' | 'medium' | 'low';
 };
 
+export type EvidenceLevel = 'demonstrated' | 'supported' | 'mentioned' | 'weak' | 'missing';
+
+export type ClaimEvidenceSnippet = { section: string; snippet: string };
+
 export type Claim = {
   type: string;
   value: string;
+  skill?: string;
   claim?: string;
-  evidence?: string[];
+  evidence?: ClaimEvidenceSnippet[] | string[];
   supporting_evidence?: string;
   confidence?: number;
   status?: 'verified' | 'inflated' | 'buzzword' | 'likely';
+  /** Structured verification quality for skill claims */
+  evidence_level?: EvidenceLevel;
+  evidence_type?: 'direct' | 'indirect' | 'missing';
   evidence_count?: number;
 };
 
@@ -39,9 +47,12 @@ export type TimelineEntry = {
 export type EvidenceItem = {
   claim: string;
   type: string;
+  skill?: string;
+  evidence_level?: EvidenceLevel;
   status: 'verified' | 'inflated' | 'buzzword' | 'likely';
   confidence: number;
-  evidence: string[];
+  evidence: ClaimEvidenceSnippet[] | string[];
+  evidence_type?: string;
   warning?: string;
 };
 
@@ -51,7 +62,23 @@ export type ClaimView = {
   claimed: string;
   conf: number;
   status: 'Verified' | 'Inflated' | 'Buzzword' | 'Likely';
+  /** New pipeline: human-readable evidence tier */
+  evidenceLevel?: EvidenceLevel | string;
+  evidences?: ClaimEvidenceSnippet[];
+  evidenceType?: string;
   reason: string;
+};
+
+export type TimelineAnalysis = {
+  overlaps?: string[];
+  gaps?: string[];
+  suspicious_inflation?: string[];
+};
+
+export type SkillTimelineInsight = {
+  skill: string;
+  first_seen: string | null;
+  experience_years_estimate: number | null;
 };
 
 export type ScanResult = {
@@ -67,6 +94,8 @@ export type ScanResult = {
   claims: Claim[];
   evidence: EvidenceItem[];
   timeline: TimelineEntry[];
+  timelineAnalysis?: TimelineAnalysis;
+  skillTimelineInsights?: SkillTimelineInsight[];
   extractedText: string;
   claimViews: ClaimView[];
   skills: string[];
@@ -106,6 +135,16 @@ function toRiskLevel(riskScore: number) {
   return 'Low';
 }
 
+function parseClaimEvidence(claim: Claim): ClaimEvidenceSnippet[] {
+  const raw = claim.evidence;
+  if (!raw || !Array.isArray(raw)) return [];
+  const first = raw[0];
+  if (first && typeof first === 'object' && 'snippet' in first) {
+    return raw as ClaimEvidenceSnippet[];
+  }
+  return (raw as string[]).map((s) => ({ section: 'resume', snippet: s }));
+}
+
 function mapClaimToView(claim: Claim): ClaimView {
   const evidenceCount = claim.evidence_count ?? 0;
   const rawStatus = claim.status;
@@ -115,36 +154,74 @@ function mapClaimToView(claim: Claim): ClaimView {
     buzzword: 'Buzzword',
     likely: 'Likely',
   } as const;
+  const evidences = parseClaimEvidence(claim);
+  const evLevel = claim.evidence_level;
+
+  let status: ClaimView['status'] = rawStatus ? statusMap[rawStatus] : 'Likely';
+  if (evLevel === 'demonstrated' || evLevel === 'supported') {
+    status = 'Verified';
+  } else if (evLevel === 'weak' || evLevel === 'missing') {
+    status = 'Inflated';
+  } else if (evLevel === 'mentioned') {
+    status = 'Likely';
+  } else if (!evLevel && claim.type === 'skill') {
+    if (evidenceCount >= 3) status = 'Verified';
+    else if (evidenceCount === 1) status = 'Inflated';
+  }
+
+  const claimedSummary =
+    evidences.length > 0
+      ? evidences
+          .slice(0, 2)
+          .map((e) => `${e.section}: ${e.snippet}`)
+          .join(' · ')
+      : claim.supporting_evidence ||
+        (evidenceCount > 0 ? `${evidenceCount} supporting mention${evidenceCount === 1 ? '' : 's'}` : '—');
+
+  let reason: string;
+  if (evLevel === 'demonstrated') {
+    reason = 'Implementation-style wording found in experience, projects, or achievements.';
+  } else if (evLevel === 'supported') {
+    reason = 'Technical context outside a bare skills line.';
+  } else if (evLevel === 'mentioned') {
+    reason = 'Primarily listed as a keyword without strong implementation bullets.';
+  } else if (evLevel === 'weak') {
+    reason = 'Vague mention with little technical context.';
+  } else if (evLevel === 'missing') {
+    reason = 'Expected from the job description but not located in parsed sections.';
+  } else if (claim.supporting_evidence) {
+    reason = claim.supporting_evidence;
+  } else {
+    reason =
+      evidenceCount > 0
+        ? `${evidenceCount} supporting mention${evidenceCount === 1 ? '' : 's'} in resume text.`
+        : 'Detected claim.';
+  }
 
   if (claim.type === 'skill') {
-    let status: ClaimView['status'] = rawStatus ? statusMap[rawStatus] : 'Likely';
-    if (!rawStatus) {
-      if (evidenceCount >= 3) status = 'Verified';
-      else if (evidenceCount === 1) status = 'Inflated';
-    }
-
     return {
-      name: claim.claim ?? claim.value,
+      name: claim.skill ?? claim.claim ?? claim.value,
       category: 'Skill Claim',
-      claimed: claim.supporting_evidence || (evidenceCount > 0 ? `${evidenceCount} supporting mention${evidenceCount === 1 ? '' : 's'}` : 'Mentioned'),
+      claimed: claimedSummary.slice(0, 520),
       conf: claim.confidence ?? Math.max(20, Math.min(95, evidenceCount * 25)),
       status,
-      reason:
-        claim.supporting_evidence
-          ? claim.supporting_evidence
-          : evidenceCount > 0
-          ? `Detected ${evidenceCount} supporting mention${evidenceCount === 1 ? '' : 's'} in the parsed resume text.`
-          : 'Detected as a resume claim.',
+      evidenceLevel: evLevel,
+      evidences,
+      evidenceType: claim.evidence_type,
+      reason,
     };
   }
 
   return {
     name: claim.claim ?? claim.value,
     category: toSentenceCase(claim.type),
-    claimed: claim.supporting_evidence || 'Claimed',
+    claimed: claimedSummary.slice(0, 520),
     conf: claim.confidence ?? 70,
-    status: rawStatus ? statusMap[rawStatus] : 'Likely',
-    reason: claim.supporting_evidence || `Detected ${claim.type} claim in the analyzed resume text.`,
+    status,
+    evidenceLevel: evLevel,
+    evidences,
+    evidenceType: claim.evidence_type,
+    reason,
   };
 }
 
@@ -168,6 +245,8 @@ function normalizeStoredScan(scan: Partial<ScanResult>): ScanResult {
     claims,
     evidence,
     timeline,
+    timelineAnalysis: scan.timelineAnalysis,
+    skillTimelineInsights: scan.skillTimelineInsights,
     extractedText: scan.extractedText ?? '',
     claimViews,
     skills: Array.isArray(scan.skills) ? scan.skills : [],
@@ -281,6 +360,10 @@ export function VerificationProvider({ children }: { children: React.ReactNode }
     const verified = await verifyResumeText(extractedText, input.jobDescription);
     const claimViews = verified.claims.map(mapClaimToView);
 
+    const v = verified as typeof verified & {
+      timeline_analysis?: TimelineAnalysis;
+      skill_timeline_insights?: SkillTimelineInsight[];
+    };
     const scan: ScanResult = {
       id: `PX-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
       candidateName: input.name.trim() || 'Unknown Candidate',
@@ -291,9 +374,11 @@ export function VerificationProvider({ children }: { children: React.ReactNode }
       compatibilityScore: verified.compatibility_score,
       verdict: verified.verdict,
       findings: verified.findings,
-      claims: verified.claims,
-      evidence: verified.evidence,
+      claims: verified.claims as Claim[],
+      evidence: verified.evidence as EvidenceItem[],
       timeline: verified.timeline,
+      timelineAnalysis: v.timeline_analysis,
+      skillTimelineInsights: v.skill_timeline_insights ?? [],
       extractedText,
       claimViews,
       skills: verified.skills,
