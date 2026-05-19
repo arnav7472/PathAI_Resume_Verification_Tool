@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router';
-import type { ClaimEvidenceSnippet, EvidenceItem, EvidenceLevel } from '../context/VerificationContext';
+import type { EvidenceLevel } from '../context/VerificationContext';
 import { useVerification } from '../context/VerificationContext';
+import { normalizeEvidence } from '../utils/evidence';
+import { EvidenceSnippets } from '../components/EvidenceSnippets';
 
 function legacyBadgeClasses(status: string) {
   switch (status) {
@@ -41,20 +43,11 @@ function confidenceBarClass(pct: number) {
   return 'bg-rose-500';
 }
 
-function normalizeSnippets(evidence: EvidenceItem['evidence']): ClaimEvidenceSnippet[] {
-  if (!evidence?.length) return [];
-  const first = evidence[0];
-  if (typeof first === 'string') {
-    return (evidence as string[]).map((s) => ({ section: 'resume', snippet: s }));
-  }
-  return evidence as ClaimEvidenceSnippet[];
-}
 
-function sectionLabel(section: string) {
-  return section.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export function Evidence() {
+  // Normalize & defensive typing handled by EvidenceSnippets to prevent React #31 crashes.
+
   const { currentScan } = useVerification();
 
   const overlapWarnings = useMemo(() => {
@@ -87,9 +80,11 @@ export function Evidence() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {currentScan.evidence.length > 0 ? (
           currentScan.evidence.map((item, index) => {
-            const rows = normalizeSnippets(item.evidence);
+            const rows = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : []) : [];
+
             const level = item.evidence_level;
             const pct = Math.max(0, Math.min(100, item.confidence));
+
 
             return (
               <div key={`${item.claim}-${index}`} className="glass-card rounded-xl border border-border p-3 space-y-2.5">
@@ -130,21 +125,14 @@ export function Evidence() {
                 </div>
 
                 <div className="space-y-2">
-                  {rows.length > 0 ? (
-                    rows.map((row, i) => (
-                      <div key={`${row.snippet}-${i}`} className="border-l-2 border-electric-blue/40 pl-2.5 py-0.5">
-                        <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-0.5">
-                          {sectionLabel(row.section)}
-                        </div>
-                        <p className="text-xs text-foreground/90 leading-snug">&ldquo;{row.snippet}&rdquo;</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-amber-300">No sentence-level snippet — claim may be inferred only.</p>
-                  )}
+                  <EvidenceSnippets
+                    evidence={rows}
+                    emptyMessage="No sentence-level snippet — claim may be inferred only."
+                  />
                 </div>
 
                 {item.warning ? <p className="text-xs text-amber-300/90 pt-0.5">{item.warning}</p> : null}
+
               </div>
             );
           })
@@ -180,7 +168,10 @@ export function Evidence() {
                       <span className="text-[10px] uppercase tracking-widest text-muted-foreground">to</span>
                       <span className="text-sm text-foreground">{entry.end_year}</span>
                     </div>
-                    {entry.evidence && <p className="text-xs text-muted-foreground mt-2 line-clamp-3">{entry.evidence}</p>}
+                    {typeof entry.evidence === 'string' && entry.evidence.trim().length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-2 line-clamp-3">{entry.evidence}</p>
+                    )}
+
                   </div>
                 ))}
               </div>
