@@ -385,12 +385,26 @@ Current analysis is deterministic and explainable. The code does not currently c
 | Route | Purpose |
 | --- | --- |
 | `/` | Upload/paste resume and job description, then run verification. |
+<img width="1917" height="1108" alt="image" src="https://github.com/user-attachments/assets/891cc015-b69e-4350-85af-6ea56ce82017" />
+
 | `/summary` | Candidate verdict, confidence, compatibility, risk, findings, matched/missing skills, and action verbs. |
+<img width="1904" height="1112" alt="image" src="https://github.com/user-attachments/assets/836da3bf-4b5a-4432-b19c-66d251abd1e2" />
+
 | `/skills` | Searchable claim and skill breakdown with confidence and evidence tiers. |
+<img width="1917" height="1112" alt="image" src="https://github.com/user-attachments/assets/0dc902a8-669e-4d24-b597-83ec3b54f055" />
+
 | `/evidence` | Sentence-level evidence snippets, risk findings, timeline ranges, and skill first-seen insights. |
+<img width="1917" height="1113" alt="image" src="https://github.com/user-attachments/assets/0a8ec989-8616-4c25-a7ca-41355b65e322" />
+
 | `/reports` | Local scan history stored in browser `localStorage`. |
+<img width="1917" height="1106" alt="image" src="https://github.com/user-attachments/assets/38b2457a-a4bd-4332-b9e1-a26d9241b7b9" />
+
 | `/settings` | Strictness level and cross-reference sync settings. |
+<img width="1917" height="1111" alt="image" src="https://github.com/user-attachments/assets/6828abe5-5e79-47b2-8ccb-36e422bd2e88" />
+
 | `/help` | In-app help content. |
+<img width="1919" height="1111" alt="image" src="https://github.com/user-attachments/assets/0ba8d982-b8f6-46bb-b02e-599dd9bd79fe" />
+
 
 ## Deployment
 
