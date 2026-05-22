@@ -1,6 +1,20 @@
 """
 FastAPI service for Path-ai Verify.
 
+Architecture: single production pipeline at verification/pipeline.py
+              (analysis_engine.py is the public adapter).
+              scoring/  → retained active scoring module.
+              parser/   → file parsers (docx, pdf).
+              parsers/  → section parsers.
+              evidence/ → evidence extraction & classification.
+              timeline/ → employment timeline analysis.
+              verification/ → core pipeline, JD extraction, skills discovery.
+
+              DEAD MODULES ARCHIVED (backend/_archive/):
+                scorer/     → duplicate of scoring/, only used in dead code.
+                signals/    → duplicate signal logic, only used in dead code.
+              Dead code removed from /verify endpoint (legacy signal path after return).
+
 Local development:
     python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 """
@@ -21,22 +35,14 @@ try:
     from backend.analysis_engine import analyze_resume
     from backend.parser.docx_parser import extract_text_from_docx
     from backend.parser.pdf_parser import extract_text_from_pdf
-    from backend.parser.resume_parser import normalize_resume_text, parse_resume_text
-    from backend.scorer.scoring import score_verification
+    from backend.parser.resume_parser import normalize_resume_text
     from backend.scoring.scorer import score_resume_text
-    from backend.signals.consistency_signal import compute_consistency_signal
-    from backend.signals.depth_signal import compute_depth_signal
-    from backend.signals.skill_signal import compute_skill_signal
 except ImportError:
     from analysis_engine import analyze_resume
     from parser.docx_parser import extract_text_from_docx
     from parser.pdf_parser import extract_text_from_pdf
-    from parser.resume_parser import normalize_resume_text, parse_resume_text
-    from scorer.scoring import score_verification
+    from parser.resume_parser import normalize_resume_text
     from scoring.scorer import score_resume_text
-    from signals.consistency_signal import compute_consistency_signal
-    from signals.depth_signal import compute_depth_signal
-    from signals.skill_signal import compute_skill_signal
 
 
 logging.basicConfig(
@@ -145,60 +151,6 @@ def ensure_extracted_text(cleaned_text: str) -> None:
             status_code=422,
             detail="No extractable text found in the uploaded file.",
         )
-
-
-def _build_claims(parsed_resume: dict) -> list[dict[str, object]]:
-    claims: list[dict[str, object]] = []
-
-    for skill, count in parsed_resume["skill_counts"].items():
-        claims.append(
-            {
-                "type": "skill",
-                "value": " ".join(part.capitalize() for part in skill.split()),
-                "evidence_count": count,
-            }
-        )
-
-    if parsed_resume["years_experience"] is not None:
-        claims.append({"type": "experience", "value": f'{parsed_resume["years_experience"]} years'})
-
-    if parsed_resume["has_senior_title"]:
-        claims.append({"type": "title", "value": "Senior-level title detected"})
-
-    return claims
-
-
-def _build_verify_response(parsed_resume: dict, verification_result: dict) -> dict:
-    confidence = int(verification_result["confidence"])
-    risk_score = max(0, min(100, 100 - confidence))
-    findings = [
-        {"message": flag, "severity": verification_result["risk"].lower()}
-        for flag in verification_result["flags"]
-    ]
-
-    if not findings:
-        findings.append(
-            {
-                "message": "No major heuristic contradictions detected.",
-                "severity": "low",
-            }
-        )
-
-    if risk_score >= 60:
-        verdict = "high_risk"
-    elif risk_score >= 30:
-        verdict = "needs_review"
-    else:
-        verdict = "likely_consistent"
-
-    return {
-        "risk_score": risk_score,
-        "confidence": confidence,
-        "verdict": verdict,
-        "findings": findings,
-        "claims": _build_claims(parsed_resume),
-        "timeline": parsed_resume["timeline"],
-    }
 
 
 @app.get("/health")
@@ -312,34 +264,6 @@ async def verify_resume(payload: VerifyRequest) -> JSONResponse:
             "cross_reference_sync": analysis["cross_reference_sync"],
         }
     )
-
-    # Legacy signal path kept below for compatibility reference; the endpoint
-    # returns from the richer JD-aware analysis above.
-    parsed_resume = parse_resume_text(cleaned_text)
-    skill_signal = compute_skill_signal(parsed_resume["skill_counts"])
-    depth_signal = compute_depth_signal(parsed_resume["text"], parsed_resume["skill_counts"])
-    consistency_signal = compute_consistency_signal(
-        skills_count=sum(parsed_resume["skill_counts"].values()),
-        years_experience=parsed_resume["years_experience"],
-        has_senior_title=parsed_resume["has_senior_title"],
-        depth_score=depth_signal["score"],
-    )
-
-    result = score_verification(
-        skills=parsed_resume["skills"],
-        skill_signal=skill_signal,
-        depth_signal=depth_signal,
-        consistency_signal=consistency_signal,
-    )
-
-    logger.info(
-        "Verified resume: confidence=%s risk=%s github=%s linkedin=%s",
-        result["confidence"],
-        result["risk"],
-        bool(payload.github and payload.github.strip()),
-        bool(payload.linkedin and payload.linkedin.strip()),
-    )
-    return JSONResponse(content=_build_verify_response(parsed_resume, result))
 
 
 if DIST_ASSETS_DIR.exists():

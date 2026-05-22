@@ -1,3 +1,10 @@
+"""Public API adapter over verification/pipeline.py.
+
+This module re-exports pipeline functions and convenience helpers
+used by main.py endpoints. The single source of truth for resume
+analysis is verification/pipeline:analyze_resume.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

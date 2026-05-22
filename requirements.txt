@@ -14,5 +14,3 @@ anyio
 annotated-doc
 typing_extensions
 
-typing_extensions
-
