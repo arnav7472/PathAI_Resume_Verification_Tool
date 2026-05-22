@@ -14,6 +14,11 @@ _IMPLEMENTATION_SECTIONS = frozenset({"experience", "projects", "achievements"})
 _CONTEXT_SECTIONS = frozenset({"experience", "projects", "education", "certifications", "achievements"})
 _SKILLS_ONLY_SECTION = "skills"
 
+# Min action verbs in a sentence to consider it action-rich
+_ACTION_RICH_THRESHOLD = 2
+# Max distinct skill-like terms before flagging as stuffed
+_STUFF_THRESHOLD = 5
+
 
 def _has_strong_action(sentence: str) -> bool:
     lower = sentence.lower()
@@ -21,6 +26,12 @@ def _has_strong_action(sentence: str) -> bool:
         if re.search(rf"\b{re.escape(verb)}ing\b|\b{re.escape(verb)}\b", lower):
             return True
     return False
+
+
+def _action_verb_count(sentence: str) -> int:
+    """Count distinct action verbs in a sentence."""
+    lower = sentence.lower()
+    return sum(1 for v in ACTION_VERBS if re.search(rf"\b{re.escape(v)}\b", lower))
 
 
 def _has_quant(sentence: str) -> bool:
@@ -31,6 +42,18 @@ def _has_quant(sentence: str) -> bool:
             re.I,
         )
     )
+
+
+def _is_keyword_stuffed(sentence: str, skill_aliases_for_context: list[str] | None = None) -> bool:
+    """Detect sentences that are just lists of skills without implementation context."""
+    # Very long comma-separated lists are suspicious
+    if sentence.count(",") >= 5 and len(sentence) < 350:
+        return True
+    # Count distinct tech-like tokens
+    tokens = re.findall(r"[A-Z][a-z]+(?:\s[A-Z][a-z]+)*|#\w+|\w+\+{2}", sentence)
+    if len(tokens) >= _STUFF_THRESHOLD and not _has_strong_action(sentence) and not _has_quant(sentence):
+        return True
+    return False
 
 
 def _is_skills_list_line(sentence: str) -> bool:
@@ -60,7 +83,11 @@ def classify_skill_evidence(
     also_in_implementation: bool,
     only_skills_hits: bool,
 ) -> EvidenceLevel:
-    """Classify a sentence by how strongly it proves the skill claim."""
+    """Classify a sentence by how strongly it proves the skill claim.
+
+    - keyword stuffing in impl sections downgrades demonstrated -> supported
+    - action verb proximity upgrades sentences in impl sections
+    """
 
     if section == _SKILLS_ONLY_SECTION and only_skills_hits and not also_in_implementation:
         if _is_vague(sentence):
@@ -68,6 +95,12 @@ def classify_skill_evidence(
         return "mentioned"
 
     if section in _IMPLEMENTATION_SECTIONS:
+        # Keyword stuffing degrades even impl sentences
+        if _is_keyword_stuffed(sentence, aliases):
+            return "supported"
+        # Multiple action verbs + metrics = strongest signal
+        if _has_quant(sentence) and _action_verb_count(sentence) >= _ACTION_RICH_THRESHOLD:
+            return "demonstrated"
         if _has_strong_action(sentence) or _has_quant(sentence):
             return "demonstrated"
         return "supported"

@@ -37,7 +37,9 @@ def weighted_base_score(hits: list[EvidenceHit], *, strictness: str) -> float:
     total = 0.0
     for h in hits:
         w = SECTION_WEIGHT.get(h.section, 3)
-        total += w * (0.85 + 0.15 * min(1.0, max(0.0, h.match_score)))
+        # Bonus for experience/projects sections - they carry more weight
+        section_bonus = 1.2 if h.section in ("experience", "projects") else 1.0
+        total += w * section_bonus * (0.85 + 0.15 * min(1.0, max(0.0, h.match_score)))
     if not hits:
         return 0.0
     avg = total / max(1, len(hits))
