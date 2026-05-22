@@ -1,0 +1,1 @@
+"""Deterministic PDF report generation for Path-ai Verify."""

@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { Link } from 'react-router';
-import { AlertCircle, CheckCircle2, TrendingUp, TrendingDown, HelpCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, TrendingUp, TrendingDown, HelpCircle, Download, Loader2, FileText } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
-import { toRiskLevel, toSentenceCase, useVerification } from '../context/VerificationContext';
+import { toRiskLevel, toSentenceCase, useVerification, API_BASE_URL } from '../context/VerificationContext';
 
 function ConfidenceIcon({ conf }: { conf: number }) {
   if (conf >= 70) return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
@@ -14,6 +14,67 @@ function RiskIcon({ risk }: { risk: number }) {
   if (risk < 30) return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
   if (risk < 60) return <TrendingUp className="w-4 h-4 text-amber-400" />;
   return <AlertCircle className="w-4 h-4 text-rose-400" />;
+}
+
+function DownloadPdfButton({ scan }: { scan: NonNullable<ReturnType<typeof useVerification>['currentScan']> }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDownload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const endpoint = API_BASE_URL ? `${API_BASE_URL}/report/pdf` : '/report/pdf';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: scan.extractedText,
+          job_description: scan.jobDescription,
+          strictness: scan.strictness,
+          cross_reference_sync: scan.crossReferenceSync,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => 'Unknown error');
+        throw new Error(err || 'Failed to generate PDF report');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'verification_report.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [scan]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={handleDownload}
+        disabled={loading}
+        className="flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-lg border border-electric-blue/40 text-electric-blue hover:bg-electric-blue/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {loading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <Download className="w-3.5 h-3.5" />
+        )}
+        {loading ? 'Generating...' : 'Download PDF'}
+      </button>
+      {error && (
+        <span className="text-[10px] text-rose-400">{error}</span>
+      )}
+    </div>
+  );
 }
 
 export function Summary() {
@@ -43,11 +104,14 @@ export function Summary() {
           <h1 className="text-2xl font-semibold text-foreground">{currentScan.candidateName}</h1>
           <p className="text-sm text-muted-foreground">JD match scan - {currentScan.id}</p>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Confidence Score</p>
-          <p className={`text-3xl font-black ${currentScan.confidence > 70 ? 'text-electric-blue' : 'text-amber-400'}`}>
-            {currentScan.confidence}%
-          </p>
+        <div className="flex flex-col items-end gap-2">
+          <div className="text-right">
+            <p className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Confidence Score</p>
+            <p className={`text-3xl font-black ${currentScan.confidence > 70 ? 'text-electric-blue' : 'text-amber-400'}`}>
+              {currentScan.confidence}%
+            </p>
+          </div>
+          <DownloadPdfButton scan={currentScan} />
         </div>
       </div>
 

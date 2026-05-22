@@ -37,6 +37,7 @@ try:
     from backend.parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
     from backend.parser.resume_parser import normalize_resume_text
     from backend.parser.extraction_quality import estimate_text_quality
+    from backend.reporting.pdf_report import build_pdf_report
     from backend.scoring.scorer import score_resume_text
 except ImportError:
     from analysis_engine import analyze_resume
@@ -44,6 +45,7 @@ except ImportError:
     from parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
     from parser.resume_parser import normalize_resume_text
     from parser.extraction_quality import estimate_text_quality
+    from reporting.pdf_report import build_pdf_report
     from scoring.scorer import score_resume_text
 
 
@@ -289,6 +291,46 @@ async def verify_resume(payload: VerifyRequest) -> JSONResponse:
             "strictness": analysis["strictness"],
             "cross_reference_sync": analysis["cross_reference_sync"],
         }
+    )
+
+
+class PdfReportRequest(BaseModel):
+    """Request body for PDF report generation — reuses same analysis."""
+    text: str = Field(..., min_length=1, max_length=200_000)
+    job_description: str | None = Field(default=None, max_length=100_000)
+    strictness: str = Field(default="medium", pattern="^(low|medium|high)$")
+    cross_reference_sync: bool = True
+
+
+@app.post("/report/pdf")
+async def generate_pdf_report(payload: PdfReportRequest):
+    """Generate a downloadable verification PDF.
+
+    Reuses the same deterministic pipeline as /verify but returns
+    a recruiter-readable PDF document instead of JSON.
+    """
+    cleaned_text = clean_text(payload.text)
+    if not cleaned_text:
+        raise HTTPException(status_code=400, detail="Resume text must not be empty.")
+
+    analysis = analyze_resume(
+        cleaned_text,
+        payload.job_description or "",
+        payload.strictness,
+        payload.cross_reference_sync,
+    )
+
+    # Pass extraction warnings from pipeline
+    pdf_bytes = build_pdf_report(analysis)
+
+    from fastapi.responses import Response
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=verification_report.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
     )
 
 
