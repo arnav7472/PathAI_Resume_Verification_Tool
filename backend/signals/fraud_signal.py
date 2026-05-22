@@ -125,6 +125,39 @@ def compute_confidence_reason(
     return "; ".join(reasons)
 
 
+def readable_confidence_explanation(confidence: int) -> str:
+    """Short explanation of what the confidence score means."""
+    if confidence >= 80:
+        return "High confidence — resume claims are consistently supported by experience and project evidence."
+    if confidence >= 60:
+        return "Moderate confidence — most key claims have supporting evidence; some gaps remain."
+    return "Low confidence — several claims lack implementation evidence or JD alignment is weak."
+
+
+def readable_risk_breakdown(
+    compatibility: int,
+    missing_skills_raw: list[str],
+    inflated_count: int,
+    consistency_count: int,
+    has_action_verbs: bool,
+) -> str:
+    """Explain what contributed to the risk score."""
+    factors: list[str] = []
+    if compatibility < 50:
+        factors.append("weak JD alignment")
+    if missing_skills_raw:
+        factors.append(f"{len(missing_skills_raw)} missing JD skill(s)")
+    if inflated_count > 0:
+        factors.append(f"{inflated_count} unsupported claim(s)")
+    if consistency_count > 0:
+        factors.append(f"{consistency_count} consistency concern(s)")
+    if not has_action_verbs:
+        factors.append("no action verbs detected")
+    if not factors:
+        return "No risk factors identified — resume is well-aligned and supported."
+    return "Risk factors: " + "; ".join(factors) + "."
+
+
 def aggregate_findings(
     findings: list[dict[str, str]],
     consistency_findings: list[dict[str, Any]],

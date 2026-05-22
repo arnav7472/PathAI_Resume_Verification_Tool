@@ -1,8 +1,20 @@
 import React from 'react';
 import { Link } from 'react-router';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, TrendingUp, TrendingDown, HelpCircle } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { toRiskLevel, toSentenceCase, useVerification } from '../context/VerificationContext';
+
+function ConfidenceIcon({ conf }: { conf: number }) {
+  if (conf >= 70) return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+  if (conf >= 40) return <HelpCircle className="w-4 h-4 text-amber-400" />;
+  return <TrendingDown className="w-4 h-4 text-rose-400" />;
+}
+
+function RiskIcon({ risk }: { risk: number }) {
+  if (risk < 30) return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+  if (risk < 60) return <TrendingUp className="w-4 h-4 text-amber-400" />;
+  return <AlertCircle className="w-4 h-4 text-rose-400" />;
+}
 
 export function Summary() {
   const { currentScan } = useVerification();
@@ -39,11 +51,46 @@ export function Summary() {
         </div>
       </div>
 
+      {/* Executive summary */}
+      {currentScan.executiveSummary && (
+        <div className="glass-card rounded-xl border border-border p-5">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle2 className="w-4 h-4 text-electric-blue" />
+            <h2 className="text-xs uppercase font-bold tracking-widest text-muted-foreground">Executive Summary</h2>
+          </div>
+          <p className="text-sm text-foreground leading-relaxed">{currentScan.executiveSummary}</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="glass-card md:col-span-2 rounded-xl border border-border p-6">
           <h2 className="text-xs uppercase font-bold tracking-widest text-muted-foreground mb-4">Verdict</h2>
           <p className="text-lg text-foreground font-medium mb-2">{toSentenceCase(currentScan.verdict)}</p>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+
+          {/* Risk summary */}
+          {currentScan.riskSummary && (
+            <div className="flex items-start gap-2 mt-3 p-3 rounded-lg bg-secondary/30">
+              <RiskIcon risk={currentScan.riskScore} />
+              <p className="text-sm text-foreground">{currentScan.riskSummary}</p>
+            </div>
+          )}
+
+          {/* Confidence explanation */}
+          {currentScan.confidenceExplanation && (
+            <div className="flex items-start gap-2 mt-2 p-3 rounded-lg bg-secondary/30">
+              <ConfidenceIcon conf={currentScan.confidence} />
+              <p className="text-sm text-foreground">{currentScan.confidenceExplanation}</p>
+            </div>
+          )}
+
+          {/* Risk breakdown */}
+          {currentScan.riskBreakdown && (
+            <div className="mt-3 p-3 rounded-lg bg-amber-950/10 border border-amber-900/20">
+              <p className="text-xs text-amber-200/80 leading-relaxed">{currentScan.riskBreakdown}</p>
+            </div>
+          )}
+
+          <p className="text-sm text-muted-foreground leading-relaxed mt-3">
             Backend analysis completed for {currentScan.candidateName}. The resume has a {currentScan.compatibilityScore}% compatibility score against the job description, a {riskLevel.toLowerCase()} risk profile, {currentScan.findings.length} finding{currentScan.findings.length === 1 ? '' : 's'}, and {currentScan.claims.length} extracted claim{currentScan.claims.length === 1 ? '' : 's'}.
           </p>
         </div>
@@ -96,6 +143,56 @@ export function Summary() {
           <p className="text-sm text-sky-300">{currentScan.actionVerbs.length ? currentScan.actionVerbs.join(', ') : 'No strong action verbs detected.'}</p>
         </div>
       </div>
+
+      {/* Positive evidence summary */}
+      {currentScan.positiveEvidenceSummary && currentScan.positiveEvidenceSummary.length > 0 && (
+        <div className="glass-card rounded-xl border border-border p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-xs uppercase font-bold tracking-widest text-muted-foreground">Positive Evidence</h2>
+          </div>
+          <div className="space-y-2">
+            {currentScan.positiveEvidenceSummary.map((note, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm text-foreground">
+                <span className="text-emerald-400 mt-0.5">•</span>
+                <span>{note}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Extraction quality warnings — operational caveats from OCR/parsing */}
+      {currentScan.extractionWarnings && currentScan.extractionWarnings.length > 0 && (
+        <div className="glass-card rounded-xl border border-amber-900/20 p-5">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="w-4 h-4 text-amber-400" />
+            <h2 className="text-xs uppercase font-bold tracking-widest text-amber-300">Extraction Notice</h2>
+          </div>
+          <ul className="space-y-1">
+            {currentScan.extractionWarnings.map((w, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-amber-200/90">
+                <span className="text-amber-400 mt-0.5">•</span>
+                <span>{w}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Low-quality scan may reduce verification accuracy. Several claims may require manual review due to weak supporting evidence.
+          </p>
+        </div>
+      )}
+
+      {/* Confidence reason */}
+      {currentScan.confidenceReason && (
+        <div className="glass-card rounded-xl border border-border p-5">
+          <div className="flex items-center gap-2 mb-2">
+            <HelpCircle className="w-4 h-4 text-muted-foreground" />
+            <h2 className="text-xs uppercase font-bold tracking-widest text-muted-foreground">Confidence Details</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">{currentScan.confidenceReason}</p>
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="flex items-center gap-2">

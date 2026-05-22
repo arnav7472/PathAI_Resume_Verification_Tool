@@ -34,14 +34,16 @@ from pydantic import BaseModel, Field
 try:
     from backend.analysis_engine import analyze_resume
     from backend.parser.docx_parser import extract_text_from_docx
-    from backend.parser.pdf_parser import extract_text_from_pdf
+    from backend.parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
     from backend.parser.resume_parser import normalize_resume_text
+    from backend.parser.extraction_quality import estimate_text_quality
     from backend.scoring.scorer import score_resume_text
 except ImportError:
     from analysis_engine import analyze_resume
     from parser.docx_parser import extract_text_from_docx
-    from parser.pdf_parser import extract_text_from_pdf
+    from parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
     from parser.resume_parser import normalize_resume_text
+    from parser.extraction_quality import estimate_text_quality
     from scoring.scorer import score_resume_text
 
 
@@ -60,7 +62,6 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://*.vercel.app",
 ]
 
 
@@ -173,11 +174,26 @@ async def extract_text(file: UploadFile = File(...)) -> JSONResponse:
     file_bytes = await read_uploaded_file(file)
     validate_file_signature(file_kind, file_bytes)
 
+    extraction_warnings: list[str] = []
+
     try:
         if file_kind == "pdf":
-            extracted_text = extract_text_from_pdf(file_bytes)
+            extracted_text, pdf_meta = extract_text_from_pdf_detailed(file_bytes)
+            extraction_warnings.extend(pdf_meta.get("warnings", []))
+            
+            # Quality assessment for text-only input (no file) is done downstream
+            quality = pdf_meta.get("quality", {})
+            if quality and quality.get("is_low_quality"):
+                extraction_warnings.append(
+                    f"Low-quality scan may reduce verification accuracy."
+                )
         else:
             extracted_text = extract_text_from_docx(file_bytes)
+            # DOCX is typically reliable, but check for empty edge case
+            if estimate_text_quality is not None:
+                quality = estimate_text_quality(extracted_text)
+                if quality.get("is_low_quality"):
+                    extraction_warnings.append(quality["detail"])
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:
@@ -191,7 +207,7 @@ async def extract_text(file: UploadFile = File(...)) -> JSONResponse:
     cleaned_text = clean_text(extracted_text)
     ensure_extracted_text(cleaned_text)
     logger.info("Processed %s file: %s", file_kind, file.filename)
-    return JSONResponse(content={"text": cleaned_text})
+    return JSONResponse(content={"text": cleaned_text, "warnings": extraction_warnings})
 
 
 @app.post("/score-resume")

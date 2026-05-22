@@ -54,7 +54,7 @@ def compute_consistency_findings(
         if lvl == "mentioned":
             consistency_findings.append(
                 {
-                    "claim": f"{sk} appears primarily as a keyword or in the skills section without implementation bullets.",
+                    "claim": f"{sk} appears in skills but lacks implementation evidence.",
                     "status": lvl,
                     "evidence": [e.get("snippet", "") for e in (c.get("evidence") or [])][:2],
                 }
@@ -70,7 +70,7 @@ def compute_consistency_findings(
         elif lvl == "missing":
             consistency_findings.append(
                 {
-                    "claim": f"{sk} is expected from the job description but was not located in parsed resume sections.",
+                    "claim": f"{sk} is required by the job description but was not found in resume sections.",
                     "status": lvl,
                     "evidence": [],
                 }

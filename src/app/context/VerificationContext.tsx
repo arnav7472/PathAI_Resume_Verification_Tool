@@ -1,10 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE_URL) {
-    // Deployment can split frontend/API; same-origin is reserved for FastAPI-served dist.
-    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
-  }
+  // Same-origin API: FastAPI serves both the frontend and API endpoints.
+  // In development, Vite dev server proxies to the FastAPI backend.
   if (import.meta.env.DEV) {
     return 'http://127.0.0.1:8000';
   }
@@ -103,6 +101,15 @@ export type ScanResult = {
   weakAreas: string[];
   strictness: 'low' | 'medium' | 'high';
   crossReferenceSync: boolean;
+  // Explainability layer
+  executiveSummary?: string;
+  riskSummary?: string;
+  confidenceExplanation?: string;
+  riskBreakdown?: string;
+  positiveEvidenceSummary?: string[];
+  confidenceReason?: string;
+  // Operational warnings (extraction quality, OCR issues)
+  extractionWarnings?: string[];
 };
 
 type VerificationInput = {
@@ -259,7 +266,7 @@ function normalizeStoredScan(scan: Partial<ScanResult>): ScanResult {
   };
 }
 
-async function extractResumeText(file: File): Promise<string> {
+async function extractResumeText(file: File): Promise<{ text: string; warnings: string[] }> {
   // File uploads cross the API boundary first; verification always receives text.
   const formData = new FormData();
   formData.append('file', file);
@@ -275,12 +282,12 @@ async function extractResumeText(file: File): Promise<string> {
     throw new Error(errorText || 'Unable to extract resume text.');
   }
 
-  const data = (await response.json()) as { text?: string };
+  const data = (await response.json()) as { text?: string; warnings?: string[] };
   if (!data.text) {
     throw new Error('Backend returned no extracted text.');
   }
 
-  return data.text;
+  return { text: data.text, warnings: data.warnings ?? [] };
 }
 
 function getScanSettings() {
@@ -312,7 +319,8 @@ async function verifyResumeText(text: string, jobDescription: string) {
     throw new Error(errorText || 'Unable to analyze resume.');
   }
 
-  return (await response.json()) as {
+  const data = await response.json() as Record<string, unknown>;
+  return data as {
     risk_score: number;
     confidence: number;
     compatibility_score: number;
@@ -328,6 +336,13 @@ async function verifyResumeText(text: string, jobDescription: string) {
     weak_areas: string[];
     strictness: 'low' | 'medium' | 'high';
     cross_reference_sync: boolean;
+    // Explainability fields (optional — from new pipeline)
+    executive_summary?: string;
+    risk_summary?: string;
+    confidence_explanation?: string;
+    risk_breakdown?: string;
+    positive_evidence_summary?: string[];
+    confidence_reason?: string;
   };
 }
 
@@ -354,7 +369,16 @@ export function VerificationProvider({ children }: { children: React.ReactNode }
   const runVerification = async (input: VerificationInput) => {
     // Pasted text wins over files to let users bypass OCR/parser uncertainty.
     const pastedText = input.text?.trim() ?? '';
-    const extractedText = pastedText || (input.file ? await extractResumeText(input.file) : '');
+    let extractedText = '';
+    let extractionWarnings: string[] = [];
+
+    if (pastedText) {
+      extractedText = pastedText;
+    } else if (input.file) {
+      const result = await extractResumeText(input.file);
+      extractedText = result.text;
+      extractionWarnings = result.warnings;
+    }
 
     if (!extractedText.trim()) {
       throw new Error('Resume text is required for analysis.');
@@ -391,6 +415,15 @@ export function VerificationProvider({ children }: { children: React.ReactNode }
       weakAreas: verified.weak_areas,
       strictness: verified.strictness,
       crossReferenceSync: verified.cross_reference_sync,
+      // Explainability layer — pass through from new pipeline
+      executiveSummary: verified.executive_summary,
+      riskSummary: verified.risk_summary,
+      confidenceExplanation: verified.confidence_explanation,
+      riskBreakdown: verified.risk_breakdown,
+      positiveEvidenceSummary: verified.positive_evidence_summary,
+      confidenceReason: verified.confidence_reason,
+      // Operational warnings from extraction
+      extractionWarnings: extractionWarnings.length > 0 ? extractionWarnings : undefined,
     };
 
     setCurrentScan(scan);

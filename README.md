@@ -7,7 +7,7 @@ Live site: https://path-ai-e215.onrender.com
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-646CFF)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
 ![OCR](https://img.shields.io/badge/OCR-Tesseract%20%2B%20OpenCV-blue)
-![Deployment](https://img.shields.io/badge/deploy-Vercel%20%2B%20Docker-black)
+![Deployment](https://img.shields.io/badge/deploy-Docker%20%2B%20Render-black)
 
 ## Overview
 
@@ -93,9 +93,8 @@ PathAI Verify currently focuses on:
 
 | Area | Technology |
 | --- | --- |
-| Static frontend | Vercel configuration for Vite |
 | Full-stack container | Docker multi-stage build |
-| Backend hosting config | Railway start command |
+| Backend hosting config | Render (via Docker) |
 | Production static serving | FastAPI serves `dist/` when present |
 
 ### Dev Tools
@@ -177,8 +176,6 @@ Path-ai/
 |-- pathai_design/                  # Next.js design-system prototype exported from Figma
 |-- dist/                           # Vite production build output
 |-- Dockerfile                      # Full-stack Node build + Python runtime image
-|-- vercel.json                     # Vercel static frontend deployment config
-|-- railway.json                    # Railway backend start command
 |-- requirements.txt                # Python backend dependencies
 |-- package.json                    # Root Vite frontend scripts and dependencies
 |-- package-lock.json               # npm lockfile
@@ -281,15 +278,10 @@ If Tesseract is not available locally, text-native PDFs and DOCX files can still
 Only the following environment variables are referenced by the current codebase:
 
 ```env
-# Frontend: send API calls to a separately hosted backend.
-# In development, the frontend defaults to http://127.0.0.1:8000.
-# In production, an empty value uses same-origin relative API paths.
-VITE_API_BASE_URL=http://127.0.0.1:8000
-
 # Frontend build base path. Defaults to /.
 VITE_BASE_PATH=/
 
-# Backend CORS allowlist. Comma-separated. If omitted, local dev origins and *.vercel.app are used.
+# Backend CORS allowlist. Comma-separated. If omitted, local development origins are used.
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 # Hosting platforms commonly provide this automatically.
@@ -410,30 +402,6 @@ Current analysis is deterministic and explainable. The code does not currently c
 
 ## Deployment
 
-### Vercel
-
-`vercel.json` is configured for the Vite frontend:
-
-```json
-{
-  "installCommand": "npm ci",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite"
-}
-```
-
-For a Vercel-only frontend deployment:
-
-1. Set the project framework to Vite.
-2. Use `npm ci` as the install command.
-3. Use `npm run build` as the build command.
-4. Use `dist` as the output directory.
-5. Set `VITE_API_BASE_URL` to the deployed backend URL.
-6. Set the backend `CORS_ORIGINS` to include the Vercel frontend domain.
-
-Deployment note: Vercel will host the static frontend only with the current configuration. The FastAPI backend and OCR dependencies need a separate backend host unless the frontend is served by the FastAPI Docker image.
-
 ### Docker
 
 The root `Dockerfile` supports a full-stack deployment:
@@ -445,16 +413,6 @@ The root `Dockerfile` supports a full-stack deployment:
 - Starts `uvicorn backend.main:app`.
 
 This is the most complete deployment path for OCR because the container includes Tesseract.
-
-### Railway
-
-`railway.json` starts the backend with:
-
-```bash
-uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-```
-
-Railway deployments should ensure Python dependencies from `requirements.txt` are installed and Tesseract is available if OCR fallback is required.
 
 ## Screenshots
 

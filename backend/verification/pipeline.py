@@ -15,13 +15,21 @@ from ..signals.depth_signal import (
     compute_timeline_signals,
     detect_action_verbs,
 )
+from ..signals.explainability import (
+    generate_executive_summary,
+    generate_risk_summary,
+    positive_evidence_summary,
+)
 from ..signals.fraud_signal import (
     aggregate_findings,
     categorize_claims,
     compute_confidence,
+    compute_confidence_reason,
     compute_initial_findings,
     compute_risk_score,
     compute_weak_areas,
+    readable_confidence_explanation,
+    readable_risk_breakdown,
 )
 from ..signals.skill_signal import (
     add_positive_findings,
@@ -36,6 +44,11 @@ from ..verification.knowledge import STRICTNESS
 from ..verification.normalize import normalize_resume_text
 from ..verification.skills_discovery import discover_skills
 from ..verification.years import extract_years_experience
+
+try:
+    from ..parser.extraction_quality import estimate_text_quality
+except ImportError:
+    estimate_text_quality = None
 
 
 def analyze_resume(
@@ -89,6 +102,56 @@ def analyze_resume(
 
     timeline_entries, timeline_analysis, skill_timeline = compute_timeline_signals(text, sections, sorted(resume_skills.keys()))
 
+    # Gather timeline warnings for executive summary
+    timeline_warnings: list[str] = []
+    if timeline_analysis:
+        timeline_warnings.extend(timeline_analysis.get("overlaps", []))
+        timeline_warnings.extend(timeline_analysis.get("gaps", []))
+        timeline_warnings.extend(timeline_analysis.get("suspicious_inflation", []))
+
+    verified_count = len(verified_claims)
+    inflated_count = len(inflated_claims)
+    consistency_count = len(consistency_findings)
+
+    # Extraction quality assessment
+    quality_warnings: list[str] = []
+    if estimate_text_quality is not None:
+        quality = estimate_text_quality(text)
+        if quality.get("is_low_quality"):
+            detail = quality.get("detail", "")
+            if detail:
+                quality_warnings.append(detail)
+
+    executive_summary = generate_executive_summary(
+        compatibility, confidence, risk_score,
+        matched_skills, missing_skills_raw,
+        verified_count, inflated_count,
+        timeline_warnings,
+        extraction_warnings=quality_warnings,
+    )
+    risk_summary = generate_risk_summary(risk_score)
+    confidence_explanation = readable_confidence_explanation(confidence)
+    risk_breakdown = readable_risk_breakdown(
+        compatibility, missing_skills_raw,
+        inflated_count, consistency_count,
+        bool(action_verbs_list),
+    )
+    positive_summary = positive_evidence_summary(claims)
+    confidence_reason = compute_confidence_reason(
+        compatibility, verified_claims, inflated_claims,
+        action_verbs_list,
+        sum(1 for c in claims
+            if c.get("evidence_level") in ("demonstrated", "supported")
+            and c.get("type") in ("experience", "project", "leadership")),
+    )
+
+    # Add quality findings to the findings list (low severity) — but only for non-trivial quality issues
+    if quality_warnings:
+        findings.append({
+            "message": "; ".join(quality_warnings),
+            "severity": "medium",
+        })
+
     return {
         "skills": sorted(resume_skills.keys()),
         "skill_counts": dict(resume_skills),
@@ -113,4 +176,11 @@ def analyze_resume(
         "years_experience": extract_years_experience(text),
         "text": text,
         "resume_sections": compute_resume_sections_summary(sections),
+        # Explainability layer additions
+        "executive_summary": executive_summary,
+        "risk_summary": risk_summary,
+        "confidence_explanation": confidence_explanation,
+        "risk_breakdown": risk_breakdown,
+        "positive_evidence_summary": positive_summary,
+        "confidence_reason": confidence_reason,
     }

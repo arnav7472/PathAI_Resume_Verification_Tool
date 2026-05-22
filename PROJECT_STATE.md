@@ -22,8 +22,6 @@
   - pytesseract + Pillow + OpenCV for OCR fallback.
 - Deployment files:
   - `Dockerfile` builds Vite frontend, installs Python deps and `tesseract-ocr`, serves FastAPI + static `dist`.
-  - `railway.json` starts `uvicorn backend.main:app`.
-  - `vercel.json` builds static Vite output only.
   - GitHub Actions deploys static Vite app to `gh-pages` with `VITE_BASE_PATH=/Path-ai/`.
 
 # Architecture
@@ -99,7 +97,7 @@ backend/
 - `src/app/App.tsx`: wraps router with `VerificationProvider` and toast provider.
 - `src/app/routes.ts`: routes under `DashboardLayout`.
 - `src/app/context/VerificationContext.tsx`:
-  - Chooses API base URL: `VITE_API_BASE_URL`, dev fallback `http://127.0.0.1:8000`, production same-origin.
+  - Chooses API base URL: dev fallback `http://127.0.0.1:8000`, production same-origin.
   - Upload extraction via `/extract-text`.
   - Verification via `/verify`.
   - Maps backend snake_case fields into frontend `ScanResult`.
@@ -273,22 +271,15 @@ backend/
   - No users, auth, tenants, audit trail, report sharing, server report IDs, or retention policy.
 
 # Deployment Setup
-- Docker path:
+- Docker + Render path:
   - Multi-stage build.
   - Node 20 builds Vite `dist`.
   - Python 3.11 runtime installs `tesseract-ocr` and Python requirements.
   - Uvicorn serves API and static frontend on `${PORT:-8000}`.
-- Railway path:
-  - Uses Nixpacks, not the Dockerfile.
-  - Start command runs `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
-  - Risk: Nixpacks may not install system `tesseract-ocr`; OCR can fail unless configured.
-- Vercel path:
-  - Static Vite build only.
-  - Needs `VITE_API_BASE_URL` pointing to deployed backend; otherwise production frontend calls same-origin `/verify` and `/extract-text`, which will not exist on static Vercel.
 - GitHub Pages path:
   - Static Vite deployment only.
   - Builds with `VITE_BASE_PATH=/Path-ai/`.
-  - Needs external backend API URL; workflow does not set `VITE_API_BASE_URL`.
+  - No longer configurable (VITE_API_BASE_URL removed); use Docker + Render deployment instead.
 - Build/import check:
   - `npm run build` completed successfully.
   - `python -c "import backend.main"` completed successfully.
@@ -349,7 +340,7 @@ backend/
 - `pathai_design` is a second frontend project with separate lockfile and dependencies, increasing monorepo ambiguity.
 
 # Security Risks
-- CORS default includes `https://*.vercel.app` while `allow_credentials=True`; broad preview-domain trust should be reviewed.
+- CORS origin configuration should be reviewed for production hardening.
 - No authentication or authorization on verification endpoints.
 - No rate limiting.
 - Upload parsing/OCR can be CPU/memory intensive; only file size and OCR page cap limit exposure.
@@ -360,8 +351,6 @@ backend/
 - No server-side audit logging or deletion/retention policy.
 
 # Deployment Risks
-- Railway/Nixpacks may miss `tesseract-ocr`; Dockerfile installs it but Railway config does not use Docker.
-- Vercel and GitHub Pages deploy only frontend; API calls fail without `VITE_API_BASE_URL`.
 - Same-origin production API mode only works when FastAPI serves `dist`.
 - GitHub Actions uses Node 18, while Docker uses Node 20 and package uses Vite 6; build currently passed locally but versions are inconsistent.
 - `requirements.txt` unpinned packages can change deploy behavior.
@@ -374,11 +363,8 @@ backend/
 
 # Immediate Priorities
 - Remove or quarantine unreachable `/verify` legacy branch and unused `github/linkedin` request fields, or implement them.
-- Decide deployment target:
-  - Single FastAPI container serving Vite SPA, or
-  - Static frontend plus separate API URL.
-- Align deployment configs with that target.
-- Add Tesseract installation/config for Railway if Railway remains supported.
+- Deployment is now consolidated to Docker + Render (single FastAPI container serving the SPA).
+- Remove legacy deployment configs.
 - Fix UI truthfulness:
   - Remove "AI" and external evidence language unless implemented.
   - Remove `.doc` from accepted upload types or add `.doc` support.
@@ -417,4 +403,4 @@ backend/
 - Add deployment profiles:
   - `docker-compose` or documented local dev.
   - Container production profile with Tesseract.
-  - Static frontend profile requiring `VITE_API_BASE_URL`.
+  - Static frontend profile requiring a backend API URL.
