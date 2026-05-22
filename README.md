@@ -2,7 +2,7 @@
 
 AI-powered resume verification and fraud-detection platform with OCR-enhanced document analysis.
 
-Live site: https://path-ai-e215.onrender.com
+Live site: [https://path-ai-e215.onrender.com](https://pathai-resume-verification-tool.onrender.com)
 
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-646CFF)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
@@ -379,6 +379,46 @@ Current analysis is deterministic and explainable. The code does not currently c
 | Route | Purpose |
 | --- | --- |
 | `/` | Upload/paste resume and job description, then run verification. |
+
+
+| `/summary` | Candidate verdict, confidence, compatibility, risk, findings, matched/missing skills, and action verbs. |
+
+
+| `/skills` | Searchable claim and skill breakdown with confidence and evidence tiers. |
+
+
+| `/evidence` | Sentence-level evidence snippets, risk findings, timeline ranges, and skill first-seen insights. |
+
+
+| `/reports` | Local scan history stored in browser `localStorage`. |
+
+
+| `/settings` | Strictness level and cross-reference sync settings. |
+
+
+| `/help` | In-app help content. |
+
+
+
+## Deployment
+
+### Docker
+
+The root `Dockerfile` supports a full-stack deployment:
+
+- Builds the Vite frontend in a Node 20 stage.
+- Installs Python dependencies in a Python 3.11 runtime.
+- Installs `tesseract-ocr`.
+- Copies `dist/` into the runtime image.
+- Starts `uvicorn backend.main:app`.
+
+This is the most complete deployment path for OCR because the container includes Tesseract.
+
+## Screenshots
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Upload/paste resume and job description, then run verification. |
 <img width="1917" height="1108" alt="image" src="https://github.com/user-attachments/assets/891cc015-b69e-4350-85af-6ea56ce82017" />
 
 | `/summary` | Candidate verdict, confidence, compatibility, risk, findings, matched/missing skills, and action verbs. |
@@ -400,31 +440,6 @@ Current analysis is deterministic and explainable. The code does not currently c
 <img width="1919" height="1111" alt="image" src="https://github.com/user-attachments/assets/0ba8d982-b8f6-46bb-b02e-599dd9bd79fe" />
 
 
-## Deployment
-
-### Docker
-
-The root `Dockerfile` supports a full-stack deployment:
-
-- Builds the Vite frontend in a Node 20 stage.
-- Installs Python dependencies in a Python 3.11 runtime.
-- Installs `tesseract-ocr`.
-- Copies `dist/` into the runtime image.
-- Starts `uvicorn backend.main:app`.
-
-This is the most complete deployment path for OCR because the container includes Tesseract.
-
-## Screenshots
-
-_Add dashboard screenshots here._
-
-Suggested captures:
-
-- Upload and scan progress
-- Summary verdict dashboard
-- Skills and claims breakdown
-- Evidence snippets and timeline analysis
-- Reports history
 
 ## Design Provenance
 
