@@ -68,6 +68,8 @@ def _skill_order(required: set[str], discovered: list[str]) -> list[str]:
 
 
 def _pattern_claims(sections: dict[str, Any], strictness: str) -> list[dict[str, Any]]:
+    """Extract non-skill claims that can be supported by local resume context."""
+
     blocks: list[tuple[str, str]] = []
     for name in ("experience", "projects", "achievements", "education", "certifications", "summary", "other"):
         for block in sections.get(name) or []:
@@ -154,6 +156,7 @@ def analyze_resume(
     matched_skills = sorted(required_skills & set(resume_skills.keys()))
     missing_skills_raw = sorted(required_skills - set(resume_skills.keys()))
 
+    # Compatibility favors JD coverage but still rewards broad resume skill evidence.
     resume_skill_count = max(1, len(resume_skills))
     match_ratio = len(matched_skills) / max(1, len(required_skills)) if required_skills else min(1.0, len(resume_skills) / 8)
     coverage_bonus = min(18, resume_skill_count * 2)
@@ -240,6 +243,7 @@ def analyze_resume(
 
     consistency_findings: list[dict[str, Any]] = []
     if cross_reference_sync:
+        # Cross-reference is internal: claims must be supported by resume sections, not external profiles.
         for c in claims:
             if c.get("type") != "skill":
                 continue
@@ -301,6 +305,7 @@ def analyze_resume(
             positive_notes += 1
 
     st = STRICTNESS[strictness]
+    # Risk starts from JD mismatch, then adds penalties for weak/missing support.
     risk_score = 100 - compatibility
     risk_score += len([c for c in inflated_claims if c.get("type") == "skill"]) * (st["inflated_penalty"] // 2)
     risk_score += len(missing_skills_raw) * (st["missing_penalty"] // 10)
@@ -310,6 +315,7 @@ def analyze_resume(
         risk_score += min(24, len(consistency_findings) * (8 if strictness == "high" else 5))
     risk_score = round(max(0, min(100, risk_score)))
 
+    # Confidence rewards compatible, supported claims and discounts inflated ones.
     confidence = round(
         max(
             0,

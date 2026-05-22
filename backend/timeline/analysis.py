@@ -12,6 +12,8 @@ EndKind = int | Literal["present"]
 
 
 def extract_timeline_entries(full_text: str) -> list[dict[str, Any]]:
+    """Extract year ranges with the source sentence kept for recruiter review."""
+
     entries: list[dict[str, Any]] = []
     for sentence in split_sentences(full_text):
         for match in re.finditer(
@@ -40,6 +42,8 @@ def _to_year_end(end: EndKind) -> int:
 
 
 def analyze_employment_spans(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Flag coarse year-level continuity issues; month-level accuracy is not inferred."""
+
     normalized: list[tuple[int, int, str]] = []
     for e in entries:
         try:
@@ -61,6 +65,7 @@ def analyze_employment_spans(entries: list[dict[str, Any]]) -> dict[str, Any]:
         for j, (sy2, ey2, ev2) in enumerate(normalized):
             if i >= j:
                 continue
+            # Overlaps are warnings only; concurrent roles and education can be legitimate.
             if sy2 <= ey and sy <= ey2:
                 overlaps.append(f"Overlapping ranges {sy}-{ey} vs {sy2}-{ey2}: {ev[:80]}…")
 

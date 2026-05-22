@@ -70,6 +70,8 @@ def extract_skill_evidence(
     required_by_jd: bool,
     global_used_snippets: set[str],
 ) -> tuple[list[EvidenceHit], EvidenceLevel]:
+    """Select the best sentence snippets for one skill and summarize evidence strength."""
+
     aliases = SKILL_ALIASES.get(skill, [skill.lower()])
     indexed = all_indexed_sentences(sections)
 
@@ -83,6 +85,7 @@ def extract_skill_evidence(
 
     candidates: list[tuple[float, SectionKey, str]] = []
     for section, sentence in all_matches:
+        # Implementation sections outrank skills lists because they show use, not just mention.
         base = _alias_match_score(sentence, aliases) + _section_priority(section) * 0.55
         if _is_noise_sentence(sentence, aliases):
             base -= 0.28
@@ -98,6 +101,7 @@ def extract_skill_evidence(
         for score, section, sentence in candidates[:12]:
             snip = truncate_snippet(sentence)
             sig = snippet_signature(snip)
+            # Prefer unique snippets across claims, but allow reuse if this skill has no evidence.
             if use_global_skip and sig in global_used_snippets and len(hits_out) > 0:
                 continue
             if sig in seen_sig:

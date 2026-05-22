@@ -1,15 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-// API_BASE_URL: Use env var if set, else dev fallback, else same-origin (relative path)
 const getApiBaseUrl = () => {
   if (import.meta.env.VITE_API_BASE_URL) {
-    // Remove trailing slash if present
+    // Deployment can split frontend/API; same-origin is reserved for FastAPI-served dist.
     return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
   }
   if (import.meta.env.DEV) {
     return 'http://127.0.0.1:8000';
   }
-  // Production + no env var? Use relative path (works when backend serves frontend)
   return '';
 };
 const API_BASE_URL = getApiBaseUrl();
@@ -146,6 +144,7 @@ function parseClaimEvidence(claim: Claim): ClaimEvidenceSnippet[] {
 }
 
 function mapClaimToView(claim: Claim): ClaimView {
+  // Backend evidence tiers are the source of truth; legacy statuses are fallback UI labels.
   const evidenceCount = claim.evidence_count ?? 0;
   const rawStatus = claim.status;
   const statusMap = {
@@ -226,6 +225,7 @@ function mapClaimToView(claim: Claim): ClaimView {
 }
 
 function normalizeStoredScan(scan: Partial<ScanResult>): ScanResult {
+  // LocalStorage can contain older report shapes, so normalize before rendering.
   const claims = Array.isArray(scan.claims) ? scan.claims : [];
   const findings = Array.isArray(scan.findings) ? scan.findings : [];
   const timeline = Array.isArray(scan.timeline) ? scan.timeline : [];
@@ -260,6 +260,7 @@ function normalizeStoredScan(scan: Partial<ScanResult>): ScanResult {
 }
 
 async function extractResumeText(file: File): Promise<string> {
+  // File uploads cross the API boundary first; verification always receives text.
   const formData = new FormData();
   formData.append('file', file);
 
@@ -292,6 +293,7 @@ function getScanSettings() {
 }
 
 async function verifyResumeText(text: string, jobDescription: string) {
+  // Settings are sent with each scan so reports remain reproducible from payload context.
   const settings = getScanSettings();
 
 
@@ -350,6 +352,7 @@ export function VerificationProvider({ children }: { children: React.ReactNode }
   }, [history]);
 
   const runVerification = async (input: VerificationInput) => {
+    // Pasted text wins over files to let users bypass OCR/parser uncertainty.
     const pastedText = input.text?.trim() ?? '';
     const extractedText = pastedText || (input.file ? await extractResumeText(input.file) : '');
 

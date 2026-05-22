@@ -20,6 +20,8 @@ _LEVEL_BANDS: dict[EvidenceLevel, tuple[int, int]] = {
 
 
 def _jitter(skill: str, claim_key: str, lo: int, hi: int) -> int:
+    """Deterministic variance keeps repeated claims from all showing identical scores."""
+
     raw = hashlib.sha256(f"{skill}|{claim_key}|confidence".encode()).hexdigest()
     n = int(raw[:8], 16)
     span = max(0, hi - lo)
@@ -27,6 +29,8 @@ def _jitter(skill: str, claim_key: str, lo: int, hi: int) -> int:
 
 
 def weighted_base_score(hits: list[EvidenceHit], *, strictness: str) -> float:
+    """Convert section quality and match strength into a structural confidence base."""
+
     if not hits:
         return 0.0
     s = STRICTNESS.get(strictness, STRICTNESS["medium"])
@@ -52,6 +56,8 @@ def confidence_for_claim(
     strictness: str,
     claim_type: str = "skill",
 ) -> int:
+    """Keep confidence inside the evidence tier band while nudging by source quality."""
+
     lo, hi = _LEVEL_BANDS[level]
     base = weighted_base_score(hits, strictness=strictness) if hits else 0.0
 

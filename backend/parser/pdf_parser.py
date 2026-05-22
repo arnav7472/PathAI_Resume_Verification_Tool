@@ -26,8 +26,8 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 
     text = "\n\n".join(chunks)
     
-    # OCR fallback if too little text extracted
     OCR_THRESHOLD = 50
+    # OCR fallback activates when native PDF text extraction is likely a scan/image.
     if len(text.strip()) < OCR_THRESHOLD and extract_text_with_ocr is not None:
         logger.info("Little text extracted (%d chars), triggering OCR fallback", len(text.strip()))
         ocr_text = extract_text_with_ocr(file_bytes)

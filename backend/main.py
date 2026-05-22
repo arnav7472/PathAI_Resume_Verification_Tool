@@ -91,6 +91,8 @@ GENERIC_BINARY_CONTENT_TYPES = {"application/octet-stream", ""}
 
 
 class ResumeTextRequest(BaseModel):
+    """Text-only scoring boundary used by /score-resume, not the main UI flow."""
+
     text: str = Field(..., min_length=1)
     job_description: str | None = Field(default=None, max_length=100_000)
     strictness: str = Field(default="medium", pattern="^(low|medium|high)$")
@@ -98,6 +100,8 @@ class ResumeTextRequest(BaseModel):
 
 
 class VerifyRequest(BaseModel):
+    """Primary verification API contract consumed by the React dashboard."""
+
     text: str = Field(..., min_length=1, max_length=200_000)
     job_description: str | None = Field(default=None, max_length=100_000)
     strictness: str = Field(default="medium", pattern="^(low|medium|high)$")
@@ -160,6 +164,8 @@ async def healthcheck() -> dict[str, str]:
 
 @app.post("/extract-text")
 async def extract_text(file: UploadFile = File(...)) -> JSONResponse:
+    """Upload boundary: validate file identity before dispatching to parsers."""
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
 
@@ -190,6 +196,8 @@ async def extract_text(file: UploadFile = File(...)) -> JSONResponse:
 
 @app.post("/score-resume")
 async def score_resume(payload: ResumeTextRequest) -> JSONResponse:
+    """Legacy-compatible text score endpoint; frontend currently uses /verify."""
+
     cleaned_text = clean_text(payload.text)
     if not cleaned_text:
         raise HTTPException(status_code=400, detail="Resume text must not be empty.")
@@ -215,6 +223,8 @@ async def score_resume(payload: ResumeTextRequest) -> JSONResponse:
 
 @app.post("/verify")
 async def verify_resume(payload: VerifyRequest) -> JSONResponse:
+    """Main report endpoint: normalize text, run deterministic analysis, shape UI payload."""
+
     cleaned_text = clean_text(payload.text)
     if not cleaned_text:
         raise HTTPException(status_code=400, detail="Resume text must not be empty.")

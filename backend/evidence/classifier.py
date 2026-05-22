@@ -60,9 +60,8 @@ def classify_skill_evidence(
     also_in_implementation: bool,
     only_skills_hits: bool,
 ) -> EvidenceLevel:
-    """
-    Classify a single sentence hit for a skill given aggregate context flags.
-    """
+    """Classify a sentence by how strongly it proves the skill claim."""
+
     if section == _SKILLS_ONLY_SECTION and only_skills_hits and not also_in_implementation:
         if _is_vague(sentence):
             return "weak"
@@ -99,6 +98,8 @@ def aggregate_skill_level(
     has_any_hit: bool,
     required_by_jd: bool,
 ) -> EvidenceLevel:
+    """Use the strongest snippet level; missing JD requirements stay explicit."""
+
     if not has_any_hit:
         return "missing" if required_by_jd else "weak"
     if not per_snippet_levels:
