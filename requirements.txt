@@ -13,4 +13,6 @@ starlette
 anyio
 annotated-doc
 typing_extensions
+reportlab
+numpy
 

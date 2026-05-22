@@ -31,22 +31,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-try:
-    from backend.analysis_engine import analyze_resume
-    from backend.parser.docx_parser import extract_text_from_docx
-    from backend.parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
-    from backend.parser.resume_parser import normalize_resume_text
-    from backend.parser.extraction_quality import estimate_text_quality
-    from backend.reporting.pdf_report import build_pdf_report
-    from backend.scoring.scorer import score_resume_text
-except ImportError:
-    from analysis_engine import analyze_resume
-    from parser.docx_parser import extract_text_from_docx
-    from parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
-    from parser.resume_parser import normalize_resume_text
-    from parser.extraction_quality import estimate_text_quality
-    from reporting.pdf_report import build_pdf_report
-    from scoring.scorer import score_resume_text
+from backend.analysis_engine import analyze_resume
+from backend.parser.docx_parser import extract_text_from_docx
+from backend.parser.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_detailed
+from backend.parser.resume_parser import normalize_resume_text
+from backend.parser.extraction_quality import estimate_text_quality
+from backend.reporting.pdf_report import build_pdf_report
+from backend.scoring.scorer import score_resume_text
 
 
 logging.basicConfig(
