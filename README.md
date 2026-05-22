@@ -2,7 +2,7 @@
 
 AI-powered resume verification and fraud-detection platform with OCR-enhanced document analysis.
 
-Live site: https://path-ai-e215.onrender.com
+Live site: [https://path-ai-e215.onrender.com](https://pathai-resume-verification-tool.onrender.com)
 
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-646CFF)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
