@@ -1,8 +1,8 @@
 # PathAI Verify
 
-AI-powered resume verification and fraud-detection platform with OCR-enhanced document analysis.
+Deterministic resume verification and consistency analysis platform with OCR-enhanced document analysis.
 
-Live site: [https://path-ai-e215.onrender.com](https://pathai-resume-verification-tool.onrender.com)
+Live site: [https://pathai-resume-verification-tool.onrender.com](https://pathai-resume-verification-tool.onrender.com)
 
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-646CFF)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
@@ -27,9 +27,19 @@ PathAI Verify currently focuses on:
 - Timeline and employment-span consistency checks
 - Dashboard, reports, evidence, skills, and settings views
 
+## How Verification Works
+
+PathAI Verify applies deterministic, heuristic-based analysis to evaluate resume claims against a job description. The process is fully explainable at every step:
+
+1. **JD extraction**: The job description is parsed to identify required skills, domains, certifications, and action verbs.
+2. **Skill and evidence matching**: Each candidate claim (skill, project, experience bullet) is matched against the JD requirements. Evidence is classified into tiers — demonstrated, supported, mentioned, weak, or missing — based on section context and supporting language.
+3. **Confidence scoring**: Claims backed by project or experience sections receive higher confidence than bare skill-list mentions. Weighted section scores produce an overall confidence band.
+4. **Risk findings**: Missing JD requirements, unsupported claims, weak evidence, buzzword-heavy phrasing, and timeline irregularities are surfaced as risk signals.
+5. **Explainability**: Every finding links back to specific resume snippets and section labels. No black-box scores — each verdict is traceable to the evidence that drove it.
+
 ## Features
 
-- **Secure upload flow**: Validates file type, file signature, empty uploads, and a 10 MB upload limit before parsing.
+- **Validated upload flow**: Checks file type, file signature, empty uploads, and a 10 MB upload limit before parsing.
 - **PDF and DOCX support**: Uses PyMuPDF for PDF text extraction and `python-docx` for DOCX paragraphs and tables.
 - **OCR fallback**: Automatically runs Tesseract OCR when a PDF has too little extractable embedded text.
 - **Image preprocessing**: Converts rendered PDF pages to grayscale and applies Otsu thresholding with OpenCV before OCR.
@@ -37,7 +47,7 @@ PathAI Verify currently focuses on:
 - **Skill extraction**: Uses a curated skill alias vocabulary covering software, cloud, DevOps, security, AI/ML, and API terms.
 - **Job-description matching**: Extracts required skills, domains, certifications, and action verbs from the job description.
 - **Verification scoring**: Computes compatibility, risk, confidence, weak areas, missing skills, and final verdicts.
-- **Fraud and inconsistency detection**: Flags unsupported skills, buzzword-heavy claims, weak evidence, missing JD requirements, timeline gaps, overlaps, and unusually long spans.
+- **Consistency and risk analysis**: Flags unsupported skills, buzzword-heavy claims, weak evidence, missing JD requirements, timeline gaps, overlaps, and unusually long spans.
 - **ATS-friendly processing**: Works from normalized text and structured resume sections rather than visual layout assumptions.
 - **Results dashboard**: Shows summary metrics, findings, matched/missing skills, claim evidence, timeline analysis, and report history.
 - **Configurable strictness**: Supports low, medium, and high verification strictness plus a cross-reference toggle.
@@ -190,6 +200,7 @@ Path-ai/
 | `POST` | `/extract-text` | Accepts a PDF or DOCX upload and returns normalized extracted text. |
 | `POST` | `/score-resume` | Scores raw resume text with evidence, depth, consistency, JD compatibility, matched skills, missing skills, and action verbs. |
 | `POST` | `/verify` | Runs the full JD-aware verification pipeline and returns risk, confidence, compatibility, verdict, claims, evidence, timeline, skills, and findings. |
+| `POST` | `/report/pdf` | Generates a downloadable PDF report for a completed verification scan. |
 | `GET` | `/` | Serves the built frontend when `dist/` exists. |
 | `GET` | `/{full_path}` | SPA fallback for built frontend routes when `dist/` exists. |
 
@@ -372,7 +383,7 @@ The main pipeline lives in `backend/verification/pipeline.py` and combines sever
 - **Timeline analysis**: Extracts year ranges, detects overlapping employment spans, possible gaps, and unusually long single spans.
 - **Strictness**: `low`, `medium`, and `high` modes adjust penalties and evidence expectations.
 
-Current analysis is deterministic and explainable. The code does not currently call an external LLM API.
+All analysis is deterministic, heuristic-based, and fully explainable. The code does not call any external LLM API.
 
 ## Dashboard Views
 
@@ -416,28 +427,26 @@ This is the most complete deployment path for OCR because the container includes
 
 ## Screenshots
 
-| Route | Purpose |
-| --- | --- |
-| `/` | Upload/paste resume and job description, then run verification. |
-<img width="1917" height="1108" alt="image" src="https://github.com/user-attachments/assets/891cc015-b69e-4350-85af-6ea56ce82017" />
+### Upload Page (/)
+![image](https://github.com/user-attachments/assets/891cc015-b69e-4350-85af-6ea56ce82017)
 
-| `/summary` | Candidate verdict, confidence, compatibility, risk, findings, matched/missing skills, and action verbs. |
-<img width="1904" height="1112" alt="image" src="https://github.com/user-attachments/assets/836da3bf-4b5a-4432-b19c-66d251abd1e2" />
+### Summary Dashboard (/summary)
+![image](https://github.com/user-attachments/assets/836da3bf-4b5a-4432-b19c-66d251abd1e2)
 
-| `/skills` | Searchable claim and skill breakdown with confidence and evidence tiers. |
-<img width="1917" height="1112" alt="image" src="https://github.com/user-attachments/assets/0dc902a8-669e-4d24-b597-83ec3b54f055" />
+### Skills Breakdown (/skills)
+![image](https://github.com/user-attachments/assets/0dc902a8-669e-4d24-b597-83ec3b54f055)
 
-| `/evidence` | Sentence-level evidence snippets, risk findings, timeline ranges, and skill first-seen insights. |
-<img width="1917" height="1113" alt="image" src="https://github.com/user-attachments/assets/0a8ec989-8616-4c25-a7ca-41355b65e322" />
+### Evidence View (/evidence)
+![image](https://github.com/user-attachments/assets/0a8ec989-8616-4c25-a7ca-41355b65e322)
 
-| `/reports` | Local scan history stored in browser `localStorage`. |
-<img width="1917" height="1106" alt="image" src="https://github.com/user-attachments/assets/38b2457a-a4bd-4332-b9e1-a26d9241b7b9" />
+### Reports History (/reports)
+![image](https://github.com/user-attachments/assets/38b2457a-a4bd-4332-b9e1-a26d9241b7b9)
 
-| `/settings` | Strictness level and cross-reference sync settings. |
-<img width="1917" height="1111" alt="image" src="https://github.com/user-attachments/assets/6828abe5-5e79-47b2-8ccb-36e422bd2e88" />
+### Settings (/settings)
+![image](https://github.com/user-attachments/assets/6828abe5-5e79-47b2-8ccb-36e422bd2e88)
 
-| `/help` | In-app help content. |
-<img width="1919" height="1111" alt="image" src="https://github.com/user-attachments/assets/0ba8d982-b8f6-46bb-b02e-599dd9bd79fe" />
+### Help (/help)
+![image](https://github.com/user-attachments/assets/0ba8d982-b8f6-46bb-b02e-599dd9bd79fe)
 
 
 
@@ -449,18 +458,23 @@ https://www.figma.com/design/FjxvRSNA7R3lPypTfKBNPw/Revise-PathAI-Verify-Mockup
 
 The production app in this repository is the root Vite application under `src/`.
 
+## Current Limitations
+
+- **Heuristic limitations**: Analysis is based on pattern matching and curated skill aliases, not semantic understanding. Subtle or context-dependent resume inflation may not be detected.
+- **OCR quality limitations**: Scanned PDF quality varies. Low-resolution scans, unusual fonts, or non-English text may reduce OCR accuracy and affect downstream analysis.
+- **Human review recommended**: Results should inform — not replace — human screening. Final hiring decisions require recruiter or hiring-manager judgment.
+- **Possible edge-case misclassification**: Unusual resume formats, non-standard section headings, or niche skill terminology may lead to missed or misclassified evidence.
+
 ## Future Improvements
 
-- LLM-based semantic verification for richer project and responsibility reasoning
 - Recruiter/admin dashboards with team-level report management
 - Backend database for persistent candidates, scans, users, and audit trails
 - Authentication and role-based access control
 - LinkedIn, GitHub, portfolio, and certification verification integrations
-- Fraud confidence calibration with labeled resume datasets
+- Confidence calibration with labeled resume datasets
 - Multilingual resume parsing and OCR language packs
-- Exportable PDF reports for hiring teams
-- Voice interview analysis and claim cross-checking against interview transcripts
-- Automated test suite for parser fixtures, OCR fallback, and API contracts
+- Exportable PDF reports for hiring teams (partially implemented)
+- Expand test coverage for parser fixtures, OCR fallback, and API contracts
 
 ## Contributing
 
@@ -479,7 +493,11 @@ npm run build
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-There is no dedicated automated test command checked into the repository yet.
+Run the automated test suite with:
+
+```bash
+python -m pytest tests/
+```
 
 ## License
 
