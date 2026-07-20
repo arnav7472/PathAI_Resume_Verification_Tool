@@ -147,7 +147,7 @@ def _get_allowed_origins() -> list[str]:
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,[IP_ADDRESS],testserver,pathai-resume-verification-tool.onrender.com").split(",") if h.strip()],
+    allowed_hosts=[h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,[IP_ADDRESS],testserver,pathai-resume-verification-tool.onrender.com,pathai-verify-v2.onrender.com").split(",") if h.strip()],
 )
 
 app.add_middleware(
