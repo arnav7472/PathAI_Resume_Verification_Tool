@@ -37,6 +37,7 @@ from backend.db.service import (
 )
 from backend.auth.depends import get_current_user, require_role
 from backend.auth.routes import router as auth_router
+from backend.llm.routes import router as v2_analyze_router
 from backend.db.models import User
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -127,6 +128,7 @@ DEFAULT_CORS_ORIGINS = [
 
 app = FastAPI(title="Path-ai Verify API")
 app.include_router(auth_router)
+app.include_router(v2_analyze_router)
 
 
 @app.on_event("startup")

@@ -9,6 +9,7 @@ Tables:
   - ranking_candidates: individual candidate results within a ranking session
   - reports:          persisted verification reports owned by users
   - password_reset_tokens: single-use 15-minute password reset tokens
+  - v2_analyses:       persisted backend/llm six-stage pipeline results (POST /v2/analyze)
 """
 
 from __future__ import annotations
@@ -147,3 +148,32 @@ class PasswordResetToken(Base):
 
     def __repr__(self) -> str:
         return f"<PasswordResetToken id={self.id} user_id={self.user_id} used={self.used}>"
+
+
+class V2Analysis(Base):
+    """Persisted result of the V2 six-stage AI pipeline (backend/llm), owned by a user.
+
+    Each stage output (CandidateProfile, JobProfile, MatchAnalysis, MatchScore,
+    Explanation, SkillGaps) is stored as its own JSON text column, following the
+    same Text-column-holds-JSON convention used by Report.analysis_data.
+    """
+
+    __tablename__ = "v2_analyses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    candidate_name = Column(String(500), nullable=False, default="Unknown Candidate")
+    job_description = Column(Text, nullable=False, default="")
+    overall_score = Column(Integer, nullable=False, default=0)
+    candidate_profile = Column(Text, nullable=False)
+    job_profile = Column(Text, nullable=False)
+    match_analysis = Column(Text, nullable=False)
+    match_score = Column(Text, nullable=False)
+    explanation = Column(Text, nullable=False)
+    skill_gaps = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<V2Analysis id={self.id} user_id={self.user_id} candidate={self.candidate_name!r} overall_score={self.overall_score}>"
