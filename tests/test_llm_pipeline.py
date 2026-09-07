@@ -361,3 +361,245 @@ def test_compute_skill_gaps_full_coverage():
     assert gaps.missing_required_skills == []
     assert gaps.coverage_percentage == 100.0
     assert any("no gaps" in rec.lower() for rec in gaps.recommendations)
+# ── Regression tests for V2 deterministic extraction fixes ──────────────────
+
+
+def test_pipe_delimited_experience() -> None:
+    """Fix 1: Pipe-delimited 'Job Title | Company | 2018-2024' -> correct title, company, dates."""
+    text = "Experience\nSenior Backend Engineer | TechCorp | 2018-2024\nSkills\nPython, Docker\n"
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.experience) == 1
+    exp = profile.experience[0]
+    assert exp.job_title == "Senior Backend Engineer"
+    assert exp.company == "TechCorp"
+    assert exp.start_year == 2018
+    assert exp.end_year == 2024
+
+
+def test_pipe_delimited_experience_current() -> None:
+    """Pipe-delimited with 'present' as end -> end_year=None."""
+    text = "Experience\nBackend Engineer | StartupCo | 2021-present\nSkills\nPython\n"
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.experience) == 1
+    exp = profile.experience[0]
+    assert exp.job_title == "Backend Engineer"
+    assert exp.company == "StartupCo"
+    assert exp.start_year == 2021
+    assert exp.end_year is None
+
+
+def test_pipe_delimited_education() -> None:
+    """Fix 2: Pipe-delimited 'Degree | Institution | 2014-2016' -> correct degree, institution, dates."""
+    text = "Education\nMS Computer Science | University | 2014-2016\n"
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.education) == 1
+    edu = profile.education[0]
+    assert edu.degree == "MS Computer Science"
+    assert edu.institution == "University"
+    assert edu.start_year == 2014
+    assert edu.end_year == 2016
+def test_pipe_delimited_education_no_pipe_before_years() -> None:
+    """Fix 2 variant: 'Degree | Institution 2014-2016' (no pipe before years) must parse."""
+    text = "Education\nMS Computer Science | University 2014-2016\n"
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.education) == 1
+    edu = profile.education[0]
+    assert edu.degree == "MS Computer Science"
+    assert edu.institution == "University"
+    assert edu.start_year == 2014
+    assert edu.end_year == 2016
+
+
+def test_extract_projects_from_section() -> None:
+    """Fix 3: Bullet points under a 'Projects' section header become project entries."""
+    text = (
+        "Experience\nSenior Engineer | Corp | 2020-2023\n\n"
+        "Projects\n- Built a real-time analytics dashboard using React and TypeScript.\n"
+        "- Implemented an event-driven pipeline with Kafka.\n\n"
+        "Skills\nPython, FastAPI\n"
+    )
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.projects) >= 2
+    names = [p.name for p in profile.projects]
+    assert any("analytics dashboard" in n for n in names)
+    assert any("event-driven pipeline" in n for n in names)
+
+
+def test_skill_extraction_word_boundary_filters_false_positives() -> None:
+    """Fix 4: 'R', 'Scala', 'SQL', 'API' must not match as substrings of other words."""
+    text = (
+        "Experience\nSenior Backend Engineer | TechCorp | 2018-2024\n"
+        "- Architected scalable microservices with PostgreSQL and FastAPI.\n"
+        "- Coordinated cross-team integration of the new platform.\n\n"
+        "Skills\nPython, TypeScript, Docker\n"
+    )
+    profile = pipeline.build_candidate_profile(text)
+    skills: list[str] = [s.lower() for s in profile.skills]
+    # False positives the word-boundary fix must eliminate:
+    assert "r" not in skills, "R should not match inside words like 'Senior'"
+    assert "scala" not in skills, "scala should not match inside 'scalable'"
+    assert "sql" not in skills, "sql should not match inside 'PostgreSQL'"
+    assert "api" not in skills, "api should not match inside 'FastAPI'"
+    # Legitimate skills that must still be found:
+    assert "python" in skills
+    assert "typescript" in skills
+    assert "docker" in skills
+    assert "fastapi" in skills
+def test_extract_preferred_skills_from_jd() -> None:
+    """Fix 5: 'Nice to have' / 'Preferred' sections in JD should populate preferred_skills."""
+    jd = (
+        "Requirements:\nMust have Python, Docker, Kubernetes.\n\n"
+        "Nice to have:\nExperience with Redis, Kafka, and PostgreSQL.\n\n"
+        "Preferred qualifications:\nFamiliarity with AWS and CI/CD pipelines.\n"
+    )
+    profile = pipeline.build_job_profile(jd)
+    assert len(profile.preferred_skills) > 0
+    pref: list[str] = [s.lower() for s in profile.preferred_skills]
+    assert "redis" in pref
+    assert "kafka" in pref
+    assert "postgresql" in pref
+    assert "aws" in pref
+
+
+def test_candidate_location_null_when_unknown() -> None:
+    """Fix 6: Unknown candidate location -> location_match is None, not False/mismatch."""
+    candidate = CandidateProfile(
+        skills=["Python"],
+        experience=[ExperienceEntry(job_title="Dev", company="Co", start_year=2020, end_year=2023)],
+    )
+    job = JobProfile(required_skills=["Python"], location="New York, NY")
+    analysis = pipeline.analyze_match(candidate, job)
+    assert analysis.location_match is None, "Must be None when candidate location is unknown"
+    assert analysis.location_match is not False
+
+
+def test_experience_years_calculated_from_parsed_dates() -> None:
+    """Fix 7: Experience-year calculation must use actual parsed employment dates."""
+    text = (
+        "Experience\nSenior Backend Engineer | TechCorp | 2018-2024\n- First role.\n\n"
+        "Junior Dev | OtherCo | 2016-2018\n- Second role.\n"
+    )
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.experience) == 2
+    total = 0
+    for exp in profile.experience:
+        end = exp.end_year if exp.end_year else 2025
+        total += end - exp.start_year
+    assert total == 8, f"Expected 8 total years of experience, got {total}"
+
+    job = JobProfile(required_skills=["Python"])
+    analysis = pipeline.analyze_match(profile, job)
+    assert analysis.candidate_experience_years == 8.0
+
+
+def test_explanation_no_spacing_artefacts() -> None:
+    """Fix 8: Explanation reason must not have malformed spacing like '8 yearsof'."""
+    analysis = MatchAnalysis(
+        matched_skills=["Python"],
+        missing_skills=["Go"],
+        candidate_experience_years=8.0,
+        education_match=True,
+        seniority_match=True,
+        location_match=True,
+    )
+    score = MatchScore(
+        overall_score=75,
+        skill_score=50,
+        experience_score=100,
+        education_score=100,
+        seniority_score=100,
+        location_score=50,
+    )
+    explanation = pipeline.generate_explanation(analysis, score)
+    reason = explanation.reason
+    assert "years of experience" in reason, f"Expected proper spacing, got: {reason}"
+    assert "yearsof" not in reason, f"Found 'yearsof' without space: {reason}"
+    assert "year  of" not in reason, f"Found double space: {reason}"
+    assert "\u2014" in explanation.recommendation or "the candidate" in explanation.recommendation
+# ── Edge-case regression tests (V2 deterministic audit) ──────────────────────
+
+
+def test_skill_extraction_matches_special_char_skills() -> None:
+    """Edge 1: c++ / c# must be detected despite non-word chars after the name."""
+    text = (
+        "Experience\nSoftware Engineer | Corp | 2020-2023\n"
+        "- Built a trading engine in C++ with real-time C# tooling and Python glue.\n"
+    )
+    profile = pipeline.build_candidate_profile(text)
+    skills: list[str] = [s.lower() for s in profile.skills]
+    assert "c++" in skills, f"c++ must be extracted, got: {skills}"
+    assert "c#" in skills, f"c# must be extracted, got: {skills}"
+    # Word-boundary behaviour for ordinary words must still hold:
+    assert "api" not in skills, "api should still not match inside FastAPI"
+
+
+def test_education_match_phd_and_multiword_requirements() -> None:
+    """Edge 2: PhD / 'A bachelor's degree' requirements must match candidate levels."""
+    candidate = CandidateProfile(
+        skills=["Python"],
+        education=[
+            EducationEntry(degree="PhD in Computer Science", institution="Uni",
+                           start_year=2014, end_year=2018),
+        ],
+    )
+    job = JobProfile(required_skills=["Python"], education_requirement="PhD degree")
+    analysis = pipeline.analyze_match(candidate, job)
+    assert analysis.education_match is True, "PhD requirement should match PhD candidate"
+
+    bachelor = CandidateProfile(
+        skills=["Python"],
+        education=[
+            EducationEntry(degree="Bachelor of Science in Maths", institution="Uni"),
+        ],
+    )
+    jd_job = JobProfile(
+        required_skills=["Python"],
+        education_requirement="A bachelor's degree or equivalent experience",
+    )
+    analysis2 = pipeline.analyze_match(bachelor, jd_job)
+    assert analysis2.education_match is True, "'A bachelor's degree' must match a BSc"
+
+
+def test_experience_parses_title_at_company_line() -> None:
+    """Edge 3: 'Job Title at Company (years)' splits title and company, not next line."""
+    text = "Experience\nSenior Backend Engineer at TechCorp (2020-2024)\n- Built APIs.\n"
+    profile = pipeline.build_candidate_profile(text)
+    assert len(profile.experience) == 1
+    exp = profile.experience[0]
+    assert exp.job_title == "Senior Backend Engineer", f"got: {exp.job_title!r}"
+    assert exp.company == "TechCorp", f"got: {exp.company!r}"
+    assert exp.start_year == 2020
+    assert exp.end_year == 2024
+    assert exp.responsibilities == ["- Built APIs."]
+
+
+def test_job_location_parses_based_in_phrase() -> None:
+    """Edge 4: 'based in <city>' / 'based out of <city>' must populate location."""
+    jd = "Remote-first team, but candidate must be based in New York, NY.\nPython required.\n"
+    profile = pipeline.build_job_profile(jd)
+    assert profile.location == "New York, NY", f"got: {profile.location!r}"
+
+    jd2 = "Must be based out of Munich.\nJava required.\n"
+    profile2 = pipeline.build_job_profile(jd2)
+    assert profile2.location == "Munich", f"got: {profile2.location!r}"
+
+
+def test_job_preferred_skills_accumulate_across_sections() -> None:
+    """Edge 5: skills from both 'Nice to have' and 'Preferred' sections must all appear."""
+    job = JobProfile(
+        required_skills=["Python", "Go"],
+        seniority_level="Mid",
+        min_experience_years=2.0,
+        max_experience_years=2.0,
+    )
+    jd = (
+        "Requirements:\nMust have Python and Go.\n\n"
+        "Nice to have:\nExperience with Redis and Kafka.\n\n"
+        "Preferred qualifications:\nFamiliarity with AWS and Terraform.\n"
+    )
+    profile = pipeline.build_job_profile(jd)
+    pref: set[str] = {s.lower() for s in profile.preferred_skills}
+    assert "redis" in pref, "Redis from 'Nice to have' must be kept"
+    assert "kafka" in pref, "Kafka from 'Nice to have' must be kept"
+    assert "aws" in pref, "AWS from 'Preferred qualifications' must be kept"
+    assert "terraform" in pref, "Terraform from 'Preferred qualifications' must be kept"

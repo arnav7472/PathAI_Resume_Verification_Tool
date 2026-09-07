@@ -79,14 +79,45 @@ _YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
+def _extract_degree_level(text: str) -> str | None:
+    """Extract a normalised degree-level keyword from *text* (e.g. 'bachelor', 'master', 'phd')."""
+    level_keywords = {
+        "phd", "ph.d", "doctorate", "doctor",
+        "master", "master's", "ms", "m.s.", "ma", "m.a.", "mba",
+        "bachelor", "bachelor's", "bs", "b.s.", "ba", "b.a.", "btech", "b.tech",
+        "associate", "diploma",
+    }
+    lower = text.lower()
+    for kw in sorted(level_keywords, key=len, reverse=True):
+        if re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", lower):
+            # Normalise common variants
+            normalised = {"ph.d": "phd", "ph.d.": "phd", "doctorate": "phd", "doctor": "phd",
+                          "master's": "master", "m.s.": "master", "m.s": "master",
+                          "ma": "master", "m.a.": "master", "m.a": "master", "mba": "master",
+                          "bachelor's": "bachelor", "b.s.": "bachelor", "b.s": "bachelor",
+                          "ba": "bachelor", "b.a.": "bachelor", "b.a": "bachelor",
+                          "btech": "bachelor", "b.tech": "bachelor",
+                          "associate": "associate", "diploma": "diploma"}.get(kw)
+            return normalised or kw
+    return None
+
+
 def _extract_skills(text: str, skill_set: Set[str] | None = None) -> list[str]:
-    """Return a sorted unique list of recognised skills found in *text*."""
+    """Return a sorted unique list of recognised skills found in *text*.
+
+    Uses non-word-boundary lookarounds to avoid false positives such as
+    "api" inside "FastAPI" or "r" inside "Senior", while still matching
+    skills that end with non-word characters like ``c++`` or ``c#``.
+    """
     if skill_set is None:
         skill_set = _COMMON_SKILLS
     lower = text.lower()
     found: set[str] = set()
     for skill in sorted(skill_set, key=len, reverse=True):
-        if skill in lower:
+        # Use (?<!\w) / (?!\w) instead of \b so that skills ending with
+        # non-word characters (e.g. "c++", "c#") still match.  \b requires
+        # a word boundary which fails after non-word characters like '+' or '#'.
+        if re.search(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", lower):
             found.add(skill)
     return sorted(found)
 
@@ -114,15 +145,52 @@ def _detect_seniority(text: str) -> str | None:
     return matched
 
 
+_PIPE_DELIM = re.compile(r"\s*\|\s*")
+_PIPE_EXP_LINE = re.compile(
+    r"^(?P<title>.+?)\s*\|\s*(?P<company>.+?)\s*\|\s*"
+    r"(?P<start>(?:19|20)\d{2})\s*[-–—]\s*(?P<end>(?:19|20)\d{2}|present|current)$",
+    re.IGNORECASE,
+)
+_PIPE_EDU_LINE = re.compile(
+    r"^(?P<degree>.+?)\s*\|\s*(?P<institution>.+?)\s*"
+    r"(?:\|\s*)?(?P<start>(?:19|20)\d{2})\s*[-–—]\s*(?P<end>(?:19|20)\d{2}|present|current)?$",
+    re.IGNORECASE,
+)
+
+
 def _parse_experience_blocks(text: str) -> list[ExperienceEntry]:
-    """Attempt to split *text* into employment blocks and return entries."""
+    """Attempt to split *text* into employment blocks and return entries.
+
+    Supports both the legacy "next-line company" layout and the common
+    pipe-delimited "Job Title | Company | 2018-2024" layout.
+    """
     entries: list[ExperienceEntry] = []
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     years = _extract_years(text)
     year_idx = 0
 
     for i, line in enumerate(lines):
+        pipe_match = _PIPE_EXP_LINE.match(line)
+        if pipe_match:
+            end_raw = pipe_match.group("end")
+            end = (
+                None
+                if end_raw and end_raw.lower() in ("present", "current")
+                else int(end_raw)
+            )
+            entries.append(ExperienceEntry(
+                job_title=pipe_match.group("title").strip(),
+                company=pipe_match.group("company").strip(),
+                start_year=int(pipe_match.group("start")),
+                end_year=end,
+                responsibilities=[],
+            ))
+            continue
+
         if year_idx >= len(years) - 1:
+            # If the current line doesn't even have a year, skip it (section header).
+            if not _YEAR_PATTERN.search(line):
+                continue
             break
         if _YEAR_PATTERN.search(line):
             start = years[year_idx]
@@ -132,6 +200,25 @@ def _parse_experience_blocks(text: str) -> list[ExperienceEntry]:
             job_title = line
             company = ""
             responsibilities: list[str] = []
+
+            # Try to split "Job Title at Company" or "Job Title @ Company"
+            # patterns that appear on the same line as the years.
+            at_match = re.match(
+                r"^(.+?)\s+at\s+(.+)$", job_title, re.IGNORECASE
+            )
+            if not at_match:
+                at_match = re.match(
+                    r"^(.+?)\s+@\s+(.+)$", job_title, re.IGNORECASE
+                )
+            if at_match:
+                job_title = at_match.group(1).strip()
+                company = at_match.group(2).strip()
+                # Drop trailing "(2020-2024)", "(2020-present)" etc. that
+                # sometimes ride along on the same line.
+                company = re.sub(
+                    r"\s*\(\s*(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)\s*\)$",
+                    "", company, flags=re.IGNORECASE,
+                ).strip()
 
             for j in range(i + 1, min(i + 6, len(lines))):
                 if _YEAR_PATTERN.search(lines[j]):
@@ -169,6 +256,26 @@ def _parse_education_blocks(text: str) -> list[EducationEntry]:
     year_idx = 0
 
     for i, line in enumerate(lines):
+        pipe_match = _PIPE_EDU_LINE.match(line)
+        if pipe_match:
+            degree_text = pipe_match.group("degree").strip()
+            # Only accept pipe-delimited education if the degree field
+            # contains an education keyword (prevents matching experience lines).
+            if degree_keywords & set(degree_text.lower().split()) or degree_pattern.search(degree_text):
+                end_raw = pipe_match.group("end")
+                end = (
+                    None
+                    if end_raw and end_raw.lower() in ("present", "current")
+                    else (int(end_raw) if end_raw else None)
+                )
+                entries.append(EducationEntry(
+                    degree=degree_text,
+                    institution=pipe_match.group("institution").strip(),
+                    start_year=int(pipe_match.group("start")),
+                    end_year=end,
+                ))
+                continue
+
         lower = line.lower()
         if any(kw in lower for kw in degree_keywords) or degree_pattern.search(line):
             start = None
@@ -212,10 +319,29 @@ def build_candidate_profile(resume_text: str) -> CandidateProfile:
     job_titles = [e.job_title for e in experience]
 
     projects: list[ProjectEntry] = []
+    in_projects_section = False
     for line in resume_text.split("\n"):
-        lower = line.strip().lower()
+        stripped = line.strip()
+        lower = stripped.lower()
+        # Detect "Projects" section header
+        if re.match(r"^projects?\s*$", lower, re.IGNORECASE):
+            in_projects_section = True
+            continue
+        # Detect another section header (end of projects section)
+        if in_projects_section and re.match(r"^[a-z][a-z\s]+$", lower, re.IGNORECASE) and len(stripped) < 30:
+            if lower.strip() not in ("projects",) and any(
+                kw in lower for kw in ["skills", "education", "experience", "summary", "certification"]
+            ):
+                in_projects_section = False
+                continue
+        if in_projects_section and stripped:
+            # Remove bullet markers
+            project_text = re.sub(r"^[•\-*]\s*", "", stripped).strip()
+            if project_text:
+                projects.append(ProjectEntry(name=project_text))
+        # Legacy explicit project markers
         if any(kw in lower for kw in ["project:", "project -", "project --"]):
-            projects.append(ProjectEntry(name=line.strip()))
+            projects.append(ProjectEntry(name=stripped))
 
     return CandidateProfile(
         skills=skills,
@@ -283,10 +409,32 @@ def build_job_profile(job_description: str) -> JobProfile:
         loc_candidate = m.group(1).strip()
         if len(loc_candidate) < 100:
             location = loc_candidate
+    if not location:
+        # Also try "based in <city>" or "based out of <city>" (no colon).
+        m = re.search(
+            r"based\s+(?:in|out\s+of)\s+([A-Za-z\s,]+?)(?:\.|$|\n)",
+            job_description, re.IGNORECASE,
+        )
+        if m:
+            loc_candidate = m.group(1).strip()
+            if len(loc_candidate) < 100:
+                location = loc_candidate
+
+    # --- Extract preferred skills from "Nice to have" / "Preferred" sections ---
+    preferred_skills: list[str] = []
+    preferred_section_pattern = re.compile(
+        r"(?:nice\s*to\s*have|preferred)\s*(?:qualifications?|skills?)?\s*[::\-]?\s*(.*?)(?=\n\s*(?:requirements|qualifications|responsibilities|about|$))",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for sec_match in preferred_section_pattern.finditer(job_description):
+        sec_text = sec_match.group(1)
+        for skill in _extract_skills(sec_text):
+            if skill.lower() not in {s.lower() for s in preferred_skills}:
+                preferred_skills.append(skill)
 
     return JobProfile(
         required_skills=required_skills,
-        preferred_skills=[],
+        preferred_skills=preferred_skills,
         required_technologies=technologies,
         min_experience_years=min_exp,
         max_experience_years=max_exp,
@@ -329,8 +477,18 @@ def analyze_match(candidate: CandidateProfile, job: JobProfile) -> MatchAnalysis
 
     education_match = None
     if candidate.education and job.education_requirement:
-        edu_text = " ".join(e.degree.lower() for e in candidate.education)
-        education_match = job.education_requirement.lower()[:5] in edu_text
+        edu_level = _extract_degree_level(job.education_requirement)
+        if edu_level:
+            cand_levels = {
+                _extract_degree_level(e.degree) for e in candidate.education
+                if _extract_degree_level(e.degree)
+            }
+            education_match = edu_level in cand_levels
+        else:
+            # Fallback: match first-5-chars only when no degree keyword was
+            # recognised in the requirement (keeps the historical behaviour).
+            edu_text = " ".join(e.degree.lower() for e in candidate.education)
+            education_match = job.education_requirement.lower()[:5] in edu_text
 
     seniority_match = None
     if candidate.seniority and job.seniority_level:
@@ -338,7 +496,9 @@ def analyze_match(candidate: CandidateProfile, job: JobProfile) -> MatchAnalysis
 
     location_match = None
     if job.location:
-        location_match = False
+        # Candidate has no location field in CandidateProfile, so we
+        # cannot determine match — set to None (unknown) rather than False.
+        location_match = None
 
     return MatchAnalysis(
         matched_skills=matched_skills,
@@ -449,6 +609,9 @@ def generate_explanation(analysis: MatchAnalysis, score: MatchScore) -> Explanat
         reason_parts.append("Seniority level mismatch.")
 
     reason = " ".join(reason_parts)
+    # Normalise whitespace to prevent encoding / spacing artefacts
+    # such as missing spaces between words.
+    reason = " ".join(reason.split())
 
     strengths: list[str] = []
     if analysis.matched_skills:
