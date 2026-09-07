@@ -93,13 +93,42 @@ def _extract_degree_level(text: str) -> str | None:
             # Normalise common variants
             normalised = {"ph.d": "phd", "ph.d.": "phd", "doctorate": "phd", "doctor": "phd",
                           "master's": "master", "m.s.": "master", "m.s": "master",
+                          "ms": "master",
                           "ma": "master", "m.a.": "master", "m.a": "master", "mba": "master",
                           "bachelor's": "bachelor", "b.s.": "bachelor", "b.s": "bachelor",
+                          "bs": "bachelor",
                           "ba": "bachelor", "b.a.": "bachelor", "b.a": "bachelor",
                           "btech": "bachelor", "b.tech": "bachelor",
                           "associate": "associate", "diploma": "diploma"}.get(kw)
             return normalised or kw
     return None
+
+
+def _extract_all_degree_levels(text: str) -> set[str]:
+    """Extract ALL normalised degree-level keywords from *text* (e.g. 'bachelor' and 'master' from \"Bachelor's or Master's\")."""
+    level_keywords = {
+        "phd", "ph.d", "doctorate", "doctor",
+        "master", "master's", "ms", "m.s.", "ma", "m.a.", "mba",
+        "bachelor", "bachelor's", "bs", "b.s.", "ba", "b.a.", "btech", "b.tech",
+        "associate", "diploma",
+    }
+    lower = text.lower()
+    found: set[str] = set()
+    normalised_map = {
+        "ph.d": "phd", "ph.d.": "phd", "doctorate": "phd", "doctor": "phd",
+        "master's": "master", "m.s.": "master", "m.s": "master",
+        "ms": "master",
+        "ma": "master", "m.a.": "master", "m.a": "master", "mba": "master",
+        "bachelor's": "bachelor", "b.s.": "bachelor", "b.s": "bachelor",
+        "bs": "bachelor",
+        "ba": "bachelor", "b.a.": "bachelor", "b.a": "bachelor",
+        "btech": "bachelor", "b.tech": "bachelor",
+        "associate": "associate", "diploma": "diploma",
+    }
+    for kw in sorted(level_keywords, key=len, reverse=True):
+        if re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", lower):
+            found.add(normalised_map.get(kw, kw))
+    return found
 
 
 def _extract_skills(text: str, skill_set: Set[str] | None = None) -> list[str]:
@@ -172,6 +201,14 @@ def _parse_experience_blocks(text: str) -> list[ExperienceEntry]:
     for i, line in enumerate(lines):
         pipe_match = _PIPE_EXP_LINE.match(line)
         if pipe_match:
+            title = pipe_match.group("title").strip()
+            # Skip education entries misidentified as experience (degree keywords in the title)
+            if any(kw in title.lower() for kw in
+                   ["bachelor", "master", "phd", "associate", "diploma", "degree"]):
+                continue
+            if re.search(r"\b(?:b\.?s\.?|m\.?s\.?|ph\.?d\.?|ba|ma|mba|btech|mtech)\b",
+                         title, re.IGNORECASE):
+                continue
             end_raw = pipe_match.group("end")
             end = (
                 None
@@ -477,13 +514,13 @@ def analyze_match(candidate: CandidateProfile, job: JobProfile) -> MatchAnalysis
 
     education_match = None
     if candidate.education and job.education_requirement:
-        edu_level = _extract_degree_level(job.education_requirement)
-        if edu_level:
+        job_levels = _extract_all_degree_levels(job.education_requirement)
+        if job_levels:
             cand_levels = {
                 _extract_degree_level(e.degree) for e in candidate.education
                 if _extract_degree_level(e.degree)
             }
-            education_match = edu_level in cand_levels
+            education_match = bool(job_levels & cand_levels)
         else:
             # Fallback: match first-5-chars only when no degree keyword was
             # recognised in the requirement (keeps the historical behaviour).
@@ -524,13 +561,15 @@ def compute_match_score(analysis: MatchAnalysis) -> MatchScore:
         skill_score = 100
 
     if analysis.candidate_experience_years is not None:
-        exp = analysis.candidate_experience_years
         if analysis.experience_gap_years is not None and analysis.experience_gap_years > 0:
+            # Below the stated minimum -> penalise by the shortfall.
             experience_score = max(0, 100 - int(analysis.experience_gap_years * 20))
         else:
-            experience_score = min(100, int(exp * 10))
+            # Requirement met (or no requirement stated) -> full credit.
+            experience_score = 100
     else:
-        experience_score = 0
+        # Unknown experience -> neutral (must NOT act as a mismatch).
+        experience_score = 50
 
     if analysis.education_match is True:
         education_score = 100

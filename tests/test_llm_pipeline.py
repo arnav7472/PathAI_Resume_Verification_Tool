@@ -275,12 +275,197 @@ def test_compute_match_score_from_analysis():
 
 
 def test_compute_match_score_empty_analysis():
-    """compute_match_score should handle empty analysis gracefully."""
+    """compute_match_score should handle empty analysis gracefully with neutral unknowns."""
     score = pipeline.compute_match_score(MatchAnalysis())
-    # weighted: 0.35*100 + 0.25*0 + 0.15*50 + 0.15*50 + 0.10*50 = 55
-    assert score.overall_score == 55
+    # All components unknown: skill=100 (no required skills), exp=50 (neutral),
+    # edu=50 (neutral), sen=50 (neutral), loc=50 (neutral).
+    # weighted: 0.35*100 + 0.25*50 + 0.15*50 + 0.15*50 + 0.10*50 = 67.5 -> 68
+    assert score.overall_score == 68
+    assert score.experience_score == 50  # unknown -> neutral, not mismatch
 
 
+# ── Deterministic scoring calibration: 6 minimal candidate/job scenarios ──────
+
+
+_EXPECTED_WEIGHTS = (0.35, 0.25, 0.15, 0.15, 0.10)
+
+
+def _expected_overall(skill, experience, education, seniority, location):
+    """Recompute the weighted overall score exactly as compute_match_score does."""
+    return round(
+        _EXPECTED_WEIGHTS[0] * skill
+        + _EXPECTED_WEIGHTS[1] * experience
+        + _EXPECTED_WEIGHTS[2] * education
+        + _EXPECTED_WEIGHTS[3] * seniority
+        + _EXPECTED_WEIGHTS[4] * location
+    )
+
+
+def test_scoring_excellent_match():
+    """Scenario 1: candidate hits every requirement -> near-perfect score, 'Yes'."""
+    job = JobProfile(
+        required_skills=["Python", "FastAPI", "Docker", "Go"],
+        preferred_skills=["Redis"],
+        min_experience_years=3,
+        education_requirement="Bachelor's degree in Computer Science",
+        seniority_level="Senior",
+    )
+    candidate = CandidateProfile(
+        skills=["Python", "FastAPI", "Docker", "Go", "Redis"],
+        seniority="Senior",
+        experience=[ExperienceEntry(job_title="Sr Eng", company="C", start_year=2018, end_year=2024)],
+        education=[EducationEntry(degree="BS in Computer Science", institution="Uni")],
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    assert analysis.missing_skills == [] and analysis.education_match is True
+    assert score.skill_score == 100
+    assert score.experience_score == 100
+    assert score.education_score == 100
+    assert score.seniority_score == 100
+    assert score.location_score == 50  # location unknown -> neutral
+    assert score.overall_score == _expected_overall(100, 100, 100, 100, 50) == 95
+    assert explanation.recommendation.startswith("Yes")
+    assert explanation.concerns == []
+
+
+def test_scoring_strong_match_with_minor_skill_gap():
+    """Scenario 2: strong candidate missing only one skill -> high but not perfect skill score."""
+    job = JobProfile(
+        required_skills=["Python", "FastAPI", "Docker", "Go"],
+        preferred_skills=["Redis"],
+        min_experience_years=3,
+        education_requirement="Bachelor's degree in Computer Science",
+        seniority_level="Senior",
+    )
+    candidate = CandidateProfile(
+        skills=["Python", "FastAPI", "Docker", "Go"],  # missing preferred: Redis
+        seniority="Senior",
+        experience=[ExperienceEntry(job_title="Sr Eng", company="C", start_year=2018, end_year=2023)],
+        education=[EducationEntry(degree="BS in Computer Science", institution="Uni")],
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    # 4 of 5 job skills matched -> 80, i.e. the missing skill pulls the score below 100.
+    assert analysis.matched_skills == ["docker", "fastapi", "go", "python"]
+    assert analysis.missing_skills == ["redis"]
+    assert score.skill_score == 80
+    assert score.experience_score == 100  # meets 3y minimum -> full credit
+    assert score.education_score == 100
+    assert score.seniority_score == 100
+    assert score.overall_score == _expected_overall(80, 100, 100, 100, 50) == 88
+    assert explanation.recommendation.startswith("Yes")
+    assert "redis" in explanation.concerns[0]
+def test_scoring_moderate_match():
+    """Scenario 3: partial skills, experience shortfall, seniority mismatch -> mid score."""
+    job = JobProfile(
+        required_skills=["Python", "FastAPI", "Docker", "Kubernetes", "Go"],
+        preferred_skills=["Redis"],
+        min_experience_years=5,
+        education_requirement="Bachelor's degree in Computer Science",
+        seniority_level="Senior",
+    )
+    candidate = CandidateProfile(
+        skills=["Python", "FastAPI", "Docker"],
+        seniority="Mid",  # mismatch vs Senior
+        experience=[ExperienceEntry(job_title="Eng", company="C", start_year=2020, end_year=2023)],
+        education=[EducationEntry(degree="BS in Computer Science", institution="Uni")],
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    assert score.skill_score == 50          # 3 of 6 skills
+    assert score.experience_score == 60     # 3y vs required 5y -> shortfall 2y -> 100-40
+    assert analysis.experience_gap_years == 2.0
+    assert score.education_score == 100
+    assert score.seniority_score == 0
+    assert score.overall_score == _expected_overall(50, 60, 100, 0, 50) == 52
+    assert explanation.recommendation.startswith("Cautious")
+
+
+def test_scoring_weak_match():
+    """Scenario 4: no skills, huge experience shortfall, failed education/seniority -> very low."""
+    job = JobProfile(
+        required_skills=["Python", "FastAPI", "Go"],
+        min_experience_years=5,
+        education_requirement="Bachelor's degree in Computer Science",
+        seniority_level="Senior",
+    )
+    candidate = CandidateProfile(
+        skills=[],
+        seniority="Junior",
+        experience=[ExperienceEntry(job_title="Jnr", company="C", start_year=2022, end_year=2023)],
+        education=[EducationEntry(degree="High School Diploma", institution="HS")],
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    assert score.skill_score == 0
+    assert score.experience_score == 20  # 1y vs 5y -> shortfall 4y -> 100-80
+    assert score.education_score == 0
+    assert score.seniority_score == 0
+    assert score.overall_score == _expected_overall(0, 20, 0, 0, 50) == 10
+    assert explanation.recommendation.startswith("No")
+def test_scoring_missing_required_education_and_experience():
+    """Scenario 5: required education/experience are missing -> component scores drop hard."""
+    job = JobProfile(
+        required_skills=["Python"],
+        min_experience_years=3,
+        education_requirement="Bachelor's degree in Computer Science",
+        seniority_level="Senior",
+    )
+    candidate = CandidateProfile(
+        skills=["Python"],
+        seniority="Senior",
+        experience=[ExperienceEntry(job_title="Eng", company="C", start_year=2022, end_year=2023)],
+        education=[EducationEntry(degree="High School Diploma", institution="HS")],
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    assert score.skill_score == 100
+    assert score.experience_score == 60     # 1y vs 3y -> shortfall 2y -> 100-40
+    assert score.education_score == 0       # missing required education
+    assert score.seniority_score == 100
+    assert score.overall_score == _expected_overall(100, 60, 0, 100, 50) == 70
+    assert explanation.recommendation.startswith("Maybe")
+    assert any("education requirement" in c for c in explanation.concerns)
+    assert any("Below minimum experience requirement" in c for c in explanation.concerns)
+
+
+def test_scoring_unknown_optional_information_is_neutral():
+    """Scenario 6: unknown optionals (location/education/seniority) must be neutral, not mismatches."""
+    job = JobProfile(required_skills=["Python"], location="Berlin")
+    candidate = CandidateProfile(
+        skills=["Python"],  # no education, no seniority, no experience — all unknown
+    )
+
+    analysis = pipeline.analyze_match(candidate, job)
+    score = pipeline.compute_match_score(analysis)
+    explanation = pipeline.generate_explanation(analysis, score)
+
+    # Candidate has no location field -> match is unknown, NOT a mismatch.
+    assert analysis.location_match is None
+    assert score.location_score == 50
+    # Unknown education / seniority are also neutral, never 0.
+    assert analysis.education_match is None and score.education_score == 50
+    assert analysis.seniority_match is None and score.seniority_score == 50
+    assert score.skill_score == 100
+    assert score.overall_score == _expected_overall(100, 100, 50, 50, 50) == 80
+    assert explanation.recommendation.startswith("Yes")
+    assert not any("location" in c.lower() for c in explanation.concerns)
 def test_generate_explanation_produces_narrative():
     """generate_explanation should produce a plausible Explanation."""
     analysis = MatchAnalysis(
@@ -603,3 +788,312 @@ def test_job_preferred_skills_accumulate_across_sections() -> None:
     assert "kafka" in pref, "Kafka from 'Nice to have' must be kept"
     assert "aws" in pref, "AWS from 'Preferred qualifications' must be kept"
     assert "terraform" in pref, "Terraform from 'Preferred qualifications' must be kept"
+# ── Compact fixture-based tests (V2 deterministic pipeline) ──────────────────
+
+
+def test_resume_standard_sections() -> None:
+    """Resume 1: Standard resume with clear sections -> all structured fields populated."""
+    resume = """Summary
+Passionate software engineer with 5 years of experience.
+
+Skills
+Python, FastAPI, Docker, PostgreSQL, AWS
+
+Experience
+Senior Backend Engineer at TechCorp (2020-2024)
+- Architected microservices using Python and FastAPI.
+- Managed Docker and Kubernetes deployments.
+- Designed PostgreSQL database schemas.
+
+Education
+MS Computer Science, University of Technology (2016-2018)
+BS Computer Science, State University (2012-2016)
+
+Projects
+Real-time Analytics Dashboard: Built with React and TypeScript.
+CI/CD Pipeline Automation using GitHub Actions and Terraform.
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills
+    assert "fastapi" in skills
+    assert "docker" in skills
+    assert "postgresql" in skills
+    assert "aws" in skills
+    assert len(profile.experience) >= 1
+    titles = [e.job_title for e in profile.experience]
+    assert any("senior" in t.lower() for t in titles)
+    assert len(profile.education) >= 2
+    degrees = [e.degree.lower() for e in profile.education]
+    assert any("ms" in d or "master" in d for d in degrees)
+    assert any("bs" in d or "bachelor" in d for d in degrees)
+    assert profile.seniority == "Senior"
+    assert len(profile.projects) > 0
+    assert any("dashboard" in p.name.lower() for p in profile.projects)
+
+
+def test_resume_pipe_delimited_full() -> None:
+    """Resume 2: Full pipe-delimited resume (experience + education)."""
+    resume = """Skills: Python, Go, Rust, Docker
+
+Experience
+Senior Backend Engineer | TechCorp | 2018-2024
+Junior Dev | OtherCo | 2016-2018
+
+Education
+MS Computer Science | University of Technology | 2014-2016
+BS Computer Science | State University | 2010-2014
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert len(profile.experience) == 2
+    e0 = profile.experience[0]
+    assert e0.job_title == "Senior Backend Engineer"
+    assert e0.company == "TechCorp"
+    assert e0.start_year == 2018
+    assert e0.end_year == 2024
+    e1 = profile.experience[1]
+    assert e1.job_title == "Junior Dev"
+    assert e1.company == "OtherCo"
+    assert e1.start_year == 2016
+    assert e1.end_year == 2018
+    assert len(profile.education) == 2
+    assert any("ms" in e.degree.lower() for e in profile.education)
+    assert any("bs" in e.degree.lower() for e in profile.education)
+    assert profile.seniority == "Senior"
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills
+    assert "go" in skills
+    assert "rust" in skills
+    assert "docker" in skills
+def test_resume_bullets_and_multiline_projects() -> None:
+    """Resume 3: Bullet items and multi-line project entries."""
+    resume = """Skills: Python, TypeScript, React, Node.js
+
+Experience
+Software Engineer | StartupCo | 2021-present
+- Built REST APIs with Node.js and Express.
+- Developed React frontend components.
+
+Projects
+- Task Management App: Full-stack app with React and Node.js.
+- CLI Tool for Data Processing: Python script for ETL pipelines.
+- Portfolio Website: Personal site built with TypeScript.
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills
+    assert "typescript" in skills
+    assert "react" in skills
+    assert "node.js" in skills
+    assert len(profile.experience) == 1
+    assert profile.experience[0].job_title == "Software Engineer"
+    assert profile.experience[0].company == "StartupCo"
+    assert profile.experience[0].start_year == 2021
+    assert profile.experience[0].end_year is None
+    assert len(profile.projects) >= 2
+    project_names = [p.name.lower() for p in profile.projects]
+    assert any("task management" in n for n in project_names)
+
+
+def test_resume_no_location() -> None:
+    """Resume 4: No location in resume -> location_match is None when matched."""
+    resume = """Skills: Python, Docker
+
+Experience
+Developer | Company | 2020-2023
+
+Education
+BS Computer Science | University | 2016-2020
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert len(profile.skills) > 0
+    assert len(profile.experience) == 1
+    assert len(profile.education) == 1
+    job = JobProfile(
+        required_skills=["Python"],
+        location="New York, NY",
+    )
+    analysis = pipeline.analyze_match(profile, job)
+    assert analysis.location_match is None, "candidate has no location -> None"
+
+
+def test_resume_short_ambiguous_skills() -> None:
+    """Resume 5: c++, c#, R, Go, and other short/ambiguous skills must be extracted."""
+    resume = """Skills: C++, C#, R, Go, Rust, SQL
+
+Experience
+Software Engineer | Corp | 2020-2023
+- Built trading engine in C++ with real-time C# tooling.
+- Used R for statistical analysis and Go for backend services.
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "c++" in skills, f"c++ missing from {skills}"
+    assert "c#" in skills, f"c# missing from {skills}"
+    assert "r" in skills, f"R (language) missing from {skills}"
+    assert "go" in skills, f"Go missing from {skills}"
+    assert "rust" in skills, f"Rust missing from {skills}"
+    assert "sql" in skills, f"SQL missing from {skills}"
+
+
+def test_resume_overlapping_dates() -> None:
+    """Resume 6: Multiple jobs with overlapping dates -> years calculated correctly."""
+    resume = """Skills: Python, AWS
+
+Experience
+Senior Engineer | Company A | 2020-2024
+Tech Lead | Company B | 2022-2025
+Consultant | Company C | 2023-present
+
+Education
+BS CS | University | 2016-2020
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert len(profile.experience) >= 2
+    total = 0
+    for exp in profile.experience:
+        end = exp.end_year if exp.end_year else 2025
+        total += end - exp.start_year
+    assert total >= 6
+    job = JobProfile(required_skills=["Python"], min_experience_years=5.0)
+    analysis = pipeline.analyze_match(profile, job)
+    assert analysis.candidate_experience_years is not None
+    assert analysis.candidate_experience_years >= 5.0
+
+
+def test_jd_required_and_preferred_skills() -> None:
+    """JD 7: JD with required + preferred skills from different sections."""
+    jd = """Job Title: Senior Python Developer
+
+Requirements:
+- 5+ years experience with Python and FastAPI.
+- Must have Docker, Kubernetes, and PostgreSQL.
+
+Nice to have:
+- Experience with Redis, Kafka, and MongoDB.
+
+Preferred qualifications:
+- Familiarity with AWS, Terraform, and CI/CD pipelines.
+
+Location: San Francisco, CA
+"""
+    profile = pipeline.build_job_profile(jd)
+    req = [s.lower() for s in profile.required_skills]
+    assert "python" in req
+    assert "fastapi" in req
+    assert "docker" in req
+    assert "kubernetes" in req
+    assert "postgresql" in req
+    pref = [s.lower() for s in profile.preferred_skills]
+    assert "redis" in pref
+    assert "kafka" in pref
+    assert "mongodb" in pref
+    assert "aws" in pref
+    assert "terraform" in pref
+    assert "ci/cd" in pref
+    assert profile.location == "San Francisco, CA"
+    assert profile.min_experience_years == 5.0
+
+
+def test_jd_bachelor_or_master_education() -> None:
+    """JD 8: 'Bachelor's or Master's' education requirement matches either level."""
+    jd = "Requirements: Bachelor's or Master's degree in Computer Science. 3+ years of Python."
+    job = pipeline.build_job_profile(jd)
+    assert job.education_requirement is not None
+    assert "bachelor" in job.education_requirement.lower()
+    assert "master" in job.education_requirement.lower()
+
+    bachelor = CandidateProfile(
+        skills=["Python"],
+        education=[EducationEntry(degree="Bachelor of Science in CS", institution="Uni")],
+        experience=[ExperienceEntry(job_title="Dev", company="Co", start_year=2020, end_year=2023)],
+    )
+    analysis_b = pipeline.analyze_match(bachelor, job)
+    assert analysis_b.education_match is True, "Bachelor's must match"
+
+    master = CandidateProfile(
+        skills=["Python"],
+        education=[EducationEntry(degree="Master of Science in CS", institution="Uni")],
+        experience=[ExperienceEntry(job_title="Dev", company="Co", start_year=2020, end_year=2023)],
+    )
+    analysis_m = pipeline.analyze_match(master, job)
+    assert analysis_m.education_match is True, "Master's must match 'Bachelor's or Master's' requirement"
+
+
+def test_jd_based_in_location() -> None:
+    """JD 9: 'based in <city>' / 'based out of <city>' location wording."""
+    jd = """Senior Data Scientist
+
+We're a remote-first team, but you must be based in Berlin.
+Requirements: 3+ years Python, machine learning, and PyTorch.
+"""
+    profile = pipeline.build_job_profile(jd)
+    assert profile.location == "Berlin", f"got: {profile.location!r}"
+    assert "python" in [s.lower() for s in profile.required_skills]
+    assert "machine learning" in [s.lower() for s in profile.required_skills]
+    assert "pytorch" in [s.lower() for s in profile.required_skills]
+    assert profile.min_experience_years == 3.0
+    assert profile.remote_allowed is True
+
+
+def test_jd_missing_optional_requirements() -> None:
+    """JD 10: JD with no preferred skills, no location, no education -> empty/null optionals."""
+    jd = """Junior Python Developer
+
+Requirements:
+- 1+ years experience with Python.
+- Familiarity with Flask or Django.
+"""
+    profile = pipeline.build_job_profile(jd)
+    assert "python" in [s.lower() for s in profile.required_skills]
+    assert any(s in [s.lower() for s in profile.required_skills] for s in ["flask", "django"])
+    assert profile.min_experience_years == 1.0
+    assert profile.preferred_skills == [], f"got: {profile.preferred_skills}"
+    assert profile.location is None, f"got: {profile.location!r}"
+    assert profile.education_requirement is None
+    assert profile.certifications_required == []
+    assert profile.languages_required == []
+# ── Dedicated regression tests for fixes ──────────────────────────────────────
+
+
+def test_regression_pipe_education_not_parsed_as_experience() -> None:
+    """Regression: pipe-delimited education lines must not leak into experience."""
+    resume = """Experience
+Senior Dev | Acme | 2019-2023
+
+Education
+MS Computer Science | Tech University | 2015-2017
+BS Computer Science | State University | 2011-2015
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    # Experience must contain only the real job, not the education rows
+    assert len(profile.experience) == 1, f"got: {profile.experience}"
+    assert profile.experience[0].job_title == "Senior Dev"
+    assert profile.experience[0].company == "Acme"
+    # Education must still be parsed correctly
+    assert len(profile.education) == 2
+    degrees = [e.degree.lower() for e in profile.education]
+    assert any("ms" in d for d in degrees)
+    assert any("bs" in d for d in degrees)
+
+
+def test_regression_bachelor_or_master_matches_both_levels() -> None:
+    """Regression: 'Bachelor's or Master's' education requirement must match either level."""
+    job = JobProfile(
+        required_skills=["Python"],
+        education_requirement="Bachelor's or Master's degree in Computer Science",
+    )
+    for degree in ("Bachelor of Science", "Master of Science", "Bachelor of Engineering"):
+        candidate = CandidateProfile(
+            skills=["Python"],
+            education=[EducationEntry(degree=degree, institution="Uni")],
+        )
+        analysis = pipeline.analyze_match(candidate, job)
+        assert analysis.education_match is True, f"{degree!r} failed for or-requirement"
+
+    non_deg = CandidateProfile(
+        skills=["Python"],
+        education=[EducationEntry(degree="Some College Courses", institution="Uni")],
+    )
+    analysis = pipeline.analyze_match(non_deg, job)
+    assert analysis.education_match is False, "non-degree candidate must not match"
