@@ -72,11 +72,13 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> UserOut:
             detail="A user with this username already exists.",
         )
 
+    # Security: public self-registration always creates "candidate".
+    # The client-supplied role is never trusted for public registration.
     user = User(
         email=payload.email,
         username=payload.username,
         hashed_password=hash_password(payload.password),
-        role=payload.role,
+        role="candidate",
     )
     db.add(user)
     db.commit()

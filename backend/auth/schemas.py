@@ -8,11 +8,16 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class UserCreate(BaseModel):
-    """Register a new user."""
+    """Register a new user.
+
+    Note: the ``role`` field is accepted for API compatibility only.  Public
+    registration always creates ``role="candidate"``; the client-supplied
+    value is never trusted (see the register route).
+    """
     email: str = Field(..., min_length=5, max_length=255)
     username: str = Field(..., min_length=2, max_length=100)
     password: str = Field(..., min_length=6, max_length=128)
-    role: str = Field(default="candidate", pattern="^(manager|candidate)$")
+    role: str = Field(default="candidate", pattern="^(candidate)$")
 
 
 class UserOut(BaseModel):

@@ -157,7 +157,14 @@ def _extract_years(text: str) -> list[int]:
 
 
 def _detect_seniority(text: str) -> str | None:
-    """Detect the most senior seniority level mentioned in *text*."""
+    """Detect the most senior seniority level mentioned in *text*.
+
+    When called from ``build_candidate_profile`` the caller should pass
+    *only* the candidate's own job titles (extracted from experience
+    entries) so that mentioning another person's seniority (e.g.
+    "Worked with the VP of Engineering") does not inflate the
+    candidate's seniority level.
+    """
     lower = text.lower()
     matched = None
     priority = 0
@@ -230,6 +237,13 @@ def _parse_experience_blocks(text: str) -> list[ExperienceEntry]:
                 continue
             break
         if _YEAR_PATTERN.search(line):
+            if "|" in line:
+                # A pipe-delimited line that did not match _PIPE_EXP_LINE is
+                # malformed (e.g. "Dev | Acme | 20-2024").  Interpreting it via
+                # the loose fallback would invent experience from arbitrary year
+                # tokens, so it is skipped.
+                year_idx += 2  # consume the year tokens as a valid entry would
+                continue
             start = years[year_idx]
             end = years[year_idx + 1] if year_idx + 1 < len(years) else None
             year_idx += 2
@@ -339,6 +353,124 @@ def _parse_education_blocks(text: str) -> list[EducationEntry]:
             ))
     return entries
 
+# ── Year validation ────────────────────────────────────────────────────────────
+
+
+def _validate_experience_years(entries: list[ExperienceEntry]) -> list[ExperienceEntry]:
+    """Filter/clamp implausible year values that could inflate experience scores.
+
+    Rules (applied per entry):
+    * start_year < 1960               → entry skipped (clearly implausible for tech)
+    * start_year > current_year       → entry skipped (future)
+    * end_year is not None and < start_year → end_year clamped to start_year
+    * end_year is not None and > current_year → end_year clamped to current_year
+    * end_year is None and (current_year - start_year) > 40 → entry skipped
+      (a single role spanning >40 years is implausible)
+    """
+    from datetime import date
+    current_year = date.today().year
+    validated: list[ExperienceEntry] = []
+    for entry in entries:
+        sy = entry.start_year
+        ey = entry.end_year
+
+        if sy < 1960 or sy > current_year:
+            continue
+
+        if ey is not None:
+            if ey < sy:
+                ey = sy
+            if ey > current_year:
+                ey = current_year
+
+        if ey is None and (current_year - sy) > 40:
+            continue
+
+        validated.append(ExperienceEntry(
+            job_title=entry.job_title,
+            company=entry.company,
+            start_year=sy,
+            end_year=ey,
+            responsibilities=entry.responsibilities,
+        ))
+    return validated
+
+
+def _get_section_text(resume_text: str) -> str:
+    """Return concatenated text of relevant resume sections (Skills, Experience,
+    Education, Projects, Technical Skills).
+
+    Only recognised section headers change the in/out state.  Unrecognised
+    lines (e.g. job titles) do NOT close an active relevant section, so we
+    avoid false negatives on structured resumes where a job-title line could
+    otherwise be mistaken for an unrelated heading.
+
+    If no recognised section header is found anywhere in the text, the
+    full text is returned (fallback for unstructured resumes).
+    """
+    _RELEVANT_HEADERS = {
+        "skills", "technical skills", "core competencies", "technologies",
+        "experience", "work experience", "employment", "professional experience",
+        "education", "academic background",
+        "projects", "project",
+    }
+    _IRRELEVANT_HEADERS = {
+        "interests", "hobbies", "references", "contact", "objective",
+        "languages", "awards", "publications", "activities", "volunteering",
+        "affiliations", "certifications",
+    }
+    _SECTION_HEADER = re.compile(r"^[a-z][a-z\s]{0,30}$", re.IGNORECASE)
+    _INLINE_HEADER = re.compile(r"^([a-z][a-z\s]{0,40}?)\s*:", re.IGNORECASE)
+
+    lines = resume_text.split("\n")
+    sections: list[str] = []
+    in_relevant_section = False
+    found_any_section = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower = stripped.lower().rstrip(":").strip()
+
+        # Standalone section header, e.g. "Experience" or "Skills".
+        if _SECTION_HEADER.match(stripped) and len(stripped) < 40:
+            if lower in _RELEVANT_HEADERS:
+                in_relevant_section = True
+                found_any_section = True
+            elif lower in _IRRELEVANT_HEADERS:
+                in_relevant_section = False
+            # Unrecognised short line (e.g. a job title) does **not** change state.
+            continue
+
+        # Inline section header with content on the same line,
+        # e.g. "Skills: Python, Docker".
+        inline = _INLINE_HEADER.match(stripped)
+        if inline and len(stripped) < 300:
+            header_name = inline.group(1).strip().lower()
+            if header_name in _RELEVANT_HEADERS:
+                in_relevant_section = True
+                found_any_section = True
+                sections.append(stripped)  # keep the content after the colon
+                continue
+            if header_name in _IRRELEVANT_HEADERS:
+                in_relevant_section = False
+                continue
+
+        if in_relevant_section:
+            sections.append(stripped)
+
+    if not found_any_section:
+        return resume_text
+
+    return "\n".join(sections)
+
+    if not found_any_section:
+        return resume_text
+
+    return "\n".join(sections)
+
+
 # ── Public pipeline stages ────────────────────────────────────────────────────
 
 
@@ -347,13 +479,20 @@ def build_candidate_profile(resume_text: str) -> CandidateProfile:
     if not resume_text or not resume_text.strip():
         return CandidateProfile()
 
-    skills = _extract_skills(resume_text)
-    technologies = _extract_skills(resume_text, _COMMON_TECHNOLOGIES)
-    experience = _parse_experience_blocks(resume_text)
-    education = _parse_education_blocks(resume_text)
-    seniority = _detect_seniority(resume_text)
+    # Security: extract skills from relevant sections only to prevent
+    # arbitrary skill-dumping in unrelated prose from inflating scores.
+    section_text = _get_section_text(resume_text)
+    skills = _extract_skills(section_text)
+    technologies = _extract_skills(section_text, _COMMON_TECHNOLOGIES)
 
+    experience = _validate_experience_years(_parse_experience_blocks(resume_text))
+    education = _parse_education_blocks(resume_text)
+
+    # Security: determine seniority from the candidate's own job titles
+    # only, not from arbitrary mentions in the resume prose.
     job_titles = [e.job_title for e in experience]
+    seniority_text = " ".join(job_titles)
+    seniority = _detect_seniority(seniority_text) if seniority_text else None
 
     projects: list[ProjectEntry] = []
     in_projects_section = False
@@ -502,10 +641,12 @@ def analyze_match(candidate: CandidateProfile, job: JobProfile) -> MatchAnalysis
     matched_technologies = sorted(candidate_techs & job_techs)
     missing_technologies = sorted(job_techs - candidate_techs)
 
+    from datetime import date
+    _current_year = date.today().year
     total_years = 0
     for exp in candidate.experience:
         if exp.start_year:
-            end = exp.end_year if exp.end_year else 2025
+            end = exp.end_year if exp.end_year else _current_year
             total_years += end - exp.start_year
 
     gap_years = None

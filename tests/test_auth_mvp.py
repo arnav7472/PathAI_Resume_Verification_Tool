@@ -8,8 +8,37 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 from backend.main import app
+from backend.auth.utils import hash_password
+from backend.db.config import SessionLocal
+from backend.db.models import User
 
 client = TestClient(app)
+
+
+def seed_manager_user(username: str = "existingmanager", password: str = "pass123",
+                      email: str = "[EMAIL]") -> None:
+    """Create (or reset role of) a manager user directly in the DB.
+
+    Public registration can no longer create managers, so tests that
+    exercise manager-only authorization seed the account via SQLAlchemy.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user is None:
+            user = User(
+                email=email,
+                username=username,
+                hashed_password=hash_password(password),
+                role="manager",
+            )
+            db.add(user)
+        else:
+            user.role = "manager"
+            user.hashed_password = hash_password(password)
+        db.commit()
+    finally:
+        db.close()
 
 
 class TestAuthMVP:
@@ -23,7 +52,7 @@ class TestAuthMVP:
         "email": "manager@test.com",
         "username": "manager1",
         "password": "pass123",
-        "role": "manager",
+        "role": "candidate",
     }
     CANDIDATE_PAYLOAD = {
         "email": "candidate@test.com",
@@ -45,7 +74,8 @@ class TestAuthMVP:
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["username"] == "manager1"
-        assert data["role"] == "manager"
+        # Security: public registration always creates candidate, never manager
+        assert data["role"] == "candidate", "role must be forced to candidate"
         assert "id" in data
         assert "hashed_password" not in data  # never exposed
 
@@ -55,6 +85,39 @@ class TestAuthMVP:
         data = resp.json()
         assert data["username"] == "candidate1"
         assert data["role"] == "candidate"
+
+    def test_register_role_omitted_defaults_to_candidate(self):
+        """Regression: omitting role from the public registration request yields 'candidate'."""
+        import uuid
+        unique = uuid.uuid4().hex[:8]
+        payload = {
+            "email": f"no_role_{unique}@test.com",
+            "username": f"no_role_user_{unique}",
+            "password": "pass123",
+        }
+        resp = self._register(payload)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["role"] == "candidate", "role must default to candidate"
+
+    def test_register_role_manager_cannot_escalate(self):
+        """Regression: a client-supplied 'manager' role must be rejected by schema validation.
+
+        Manager accounts can only exist by direct database provisioning;
+        public registration rejects 'manager' at the schema level.
+        """
+        import uuid
+        unique = uuid.uuid4().hex[:8]
+        payload = {
+            "email": f"escalate_{unique}@test.com",
+            "username": f"escalate_user_{unique}",
+            "password": "pass123",
+            "role": "manager",
+        }
+        resp = self._register(payload)
+        # Schema pattern ^(candidate)$ rejects "manager" → 422 Unprocessable Entity
+        assert resp.status_code == 422, (
+            f"role='manager' must be rejected, got {resp.status_code}: {resp.text}"
+        )
 
     def test_register_duplicate_email(self):
         resp = self._register(self.MANAGER_PAYLOAD)
@@ -89,6 +152,27 @@ class TestAuthMVP:
         })
         assert resp.status_code == 422, resp.text
 
+    # ── Regression: existing manager auth ─────────────────────────────────
+
+    def test_existing_manager_authentication(self):
+        """Regression: pre-provisioned manager accounts must continue to
+        authenticate and retain their manager role after the schema fix."""
+        import uuid
+        unique = uuid.uuid4().hex[:8]
+        seed_manager_user(
+            f"regression_mgr_{unique}",
+            "pass123",
+            f"regression_mgr_{unique}@test.com",
+        )
+        login_resp = self._login(f"regression_mgr_{unique}", "pass123")
+        assert login_resp.status_code == 200, login_resp.text
+        token = login_resp.json()["access_token"]
+        me_resp = client.get(
+            self.ME_URL,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me_resp.status_code == 200, me_resp.text
+        assert me_resp.json()["role"] == "manager"
     # ── Login ─────────────────────────────────────────────────────────────
 
     def test_login_manager(self):
@@ -115,12 +199,13 @@ class TestAuthMVP:
     # ── GET /me ────────────────────────────────────────────────────────────
 
     def test_me_authenticated(self):
-        login_resp = self._login("manager1", "pass123")
+        seed_manager_user()
+        login_resp = self._login("existingmanager", "pass123")
         token = login_resp.json()["access_token"]
         resp = client.get(self.ME_URL, headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data["username"] == "manager1"
+        assert data["username"] == "existingmanager"
         assert data["role"] == "manager"
 
     def test_me_no_token(self):
@@ -134,7 +219,8 @@ class TestAuthMVP:
     # ── Protected endpoints ───────────────────────────────────────────────
 
     def test_protected_me_authenticated(self):
-        login_resp = self._login("manager1", "pass123")
+        seed_manager_user()
+        login_resp = self._login("existingmanager", "pass123")
         token = login_resp.json()["access_token"]
         resp = client.get("/api/protected/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200, resp.text
@@ -144,7 +230,8 @@ class TestAuthMVP:
         assert resp.status_code == 401, resp.text
 
     def test_manager_only_as_manager(self):
-        login_resp = self._login("manager1", "pass123")
+        seed_manager_user()
+        login_resp = self._login("existingmanager", "pass123")
         token = login_resp.json()["access_token"]
         resp = client.get("/api/protected/manager-only", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200, resp.text
@@ -164,7 +251,8 @@ class TestAuthMVP:
         assert resp.json()["role"] == "candidate"
 
     def test_candidate_only_as_manager(self):
-        login_resp = self._login("manager1", "pass123")
+        seed_manager_user("manager_for_cand_test", "pass123", "mgr_cand_test@test.com")
+        login_resp = self._login("manager_for_cand_test", "pass123")
         token = login_resp.json()["access_token"]
         resp = client.get("/api/protected/candidate-only", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 403, resp.text  # Forbidden
@@ -221,8 +309,10 @@ class TestAuthMVP:
     def test_reset_password_flow_end_to_end(self):
         """Full end-to-end: forgot-password → extract token from DB → reset password."""
         # Register a dedicated user for this test
-        test_email = "[EMAIL]"
-        test_username = "reset_test_user"
+        import uuid
+        unique_suffix = uuid.uuid4().hex[:8]
+        test_email = f"reset_{unique_suffix}@test.com"
+        test_username = f"reset_user_{unique_suffix}"
         register_resp = client.post(
             "/api/auth/register",
             json={

@@ -17,8 +17,9 @@ os.environ["DATABASE_URL"] = "sqlite:///test_v2_analyze.db"
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.db.config import engine, Base, get_db, init_db
-from backend.db.models import V2Analysis
+from backend.auth.utils import hash_password
+from backend.db.config import engine, Base, SessionLocal, get_db, init_db
+from backend.db.models import User, V2Analysis
 
 init_db()
 
@@ -58,6 +59,31 @@ class TestV2Analyze:
         except Exception:
             pass
 
+    def _seed_manager(self, username: str, email: str | None = None) -> str:
+        """Create a manager user directly in the DB (bypasses public registration)."""
+        if email is None:
+            email = f"{username}@test.com"
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == username).first()
+            if user is None:
+                user = User(
+                    email=email,
+                    username=username,
+                    hashed_password=hash_password("password123"),
+                    role="manager",
+                )
+                db.add(user)
+            else:
+                user.role = "manager"
+                user.hashed_password = hash_password("password123")
+            db.commit()
+        finally:
+            db.close()
+        login = client.post(LOGIN_URL, json={"username": username, "password": "password123"})
+        assert login.status_code == 200, login.text
+        return login.json()["access_token"]
+
     def _register_and_login(self, email: str, username: str, role: str) -> str:
         reg = client.post(
             REGISTER_URL,
@@ -69,7 +95,7 @@ class TestV2Analyze:
         return login.json()["access_token"]
 
     def _manager_headers(self, suffix: str = "a") -> dict[str, str]:
-        token = self._register_and_login(f"mgr{suffix}@test.com", f"mgr{suffix}", "manager")
+        token = self._seed_manager(f"mgr{suffix}")
         return {"Authorization": f"Bearer {token}"}
 
     # ── Auth / role gating ────────────────────────────────────────────────

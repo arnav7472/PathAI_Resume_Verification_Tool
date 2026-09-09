@@ -1053,6 +1053,86 @@ Requirements:
     assert profile.education_requirement is None
     assert profile.certifications_required == []
     assert profile.languages_required == []
+# ── Security regression tests (Claude security audit) ─────────────────────────
+
+
+def test_regression_skill_in_skills_section_matched() -> None:
+    """Skill listed under a Skills section must be extracted at full strength."""
+    resume = """Skills
+Python, Docker
+
+Experience
+Software Engineer | Corp | 2020-2023
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills, f"python missing: {skills}"
+    assert "docker" in skills, f"docker missing: {skills}"
+
+
+def test_regression_skill_in_experience_matched() -> None:
+    """Skill used legitimately inside an Experience entry must be extracted."""
+    resume = """Experience
+Software Engineer | Corp | 2020-2023
+- Built async services in Python and deployed them with Docker.
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills, f"python missing: {skills}"
+    assert "docker" in skills, f"docker missing: {skills}"
+
+
+def test_regression_skill_dump_in_unrelated_prose_not_full_strength() -> None:
+    """A keyword dump in an unrelated section must not count as evidence.
+
+    The legitimate skill context (Experience) is kept; the unrelated dump
+    (Interests) is not treated as equivalent evidence for the skill score.
+    """
+    resume = """Experience
+Junior Developer | Acme | 2021-2024
+- Built internal tooling with Python and Git.
+
+Interests
+Docker, Kubernetes, AWS, Terraform, SQL, PostgreSQL, React, TypeScript
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    skills = [s.lower() for s in profile.skills]
+    assert "python" in skills, "legitimate Experience skill must be kept"
+    assert "git" in skills, "legitimate Experience skill must be kept"
+    for dumped in ("docker", "kubernetes", "aws", "terraform", "sql",
+                   "postgresql", "react", "typescript"):
+        assert dumped not in skills, f"dumped skill {dumped!r} must not count: {skills}"
+
+
+def test_regression_seniority_not_from_other_peoples_titles() -> None:
+    """Regression: another person's seniority in prose must not promote the candidate."""
+    resume = """Experience
+Junior Software Engineer | Acme | 2021-2024
+- Worked closely with the VP of Engineering and the Chief Technology Officer.
+- Reported directly to the Director of Platform.
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert profile.seniority == "Junior", f"got: {profile.seniority!r}"
+
+
+def test_regression_seniority_from_own_vp_title() -> None:
+    """An actual 'VP of Engineering' job title must map to VP."""
+    resume = """Experience
+VP of Engineering | Acme | 2019-2024
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert profile.seniority == "VP", f"got: {profile.seniority!r}"
+
+
+def test_regression_seniority_from_own_senior_title() -> None:
+    """An actual 'Senior Software Engineer' job title must map to Senior."""
+    resume = """Experience
+Senior Software Engineer | Acme | 2020-2024
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert profile.seniority == "Senior", f"got: {profile.seniority!r}"
+
+
 # ── Dedicated regression tests for fixes ──────────────────────────────────────
 
 
@@ -1097,3 +1177,60 @@ def test_regression_bachelor_or_master_matches_both_levels() -> None:
     )
     analysis = pipeline.analyze_match(non_deg, job)
     assert analysis.education_match is False, "non-degree candidate must not match"
+def test_regression_normal_dates_remain_valid() -> None:
+    """Normal employment dates must pass through the year validation untouched."""
+    resume = """Experience
+Software Engineer | Company | 2018-2024
+Dev | Older Co | 2014-2018
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert len(profile.experience) == 2
+    assert profile.experience[0].start_year == 2018
+    assert profile.experience[0].end_year == 2024
+    assert profile.experience[1].start_year == 2014
+    assert profile.experience[1].end_year == 2018
+
+
+def test_regression_1970_present_does_not_inflate_experience() -> None:
+    """'1970-present' (an absurd single-role span) must not inflate experience."""
+    resume = """Experience
+Software Engineer | Company | 1970-present
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert profile.experience == [], f"implausible entry must be dropped: {profile.experience}"
+    job = JobProfile(required_skills=["Python"], min_experience_years=5.0)
+    analysis = pipeline.analyze_match(profile, job)
+    assert analysis.candidate_experience_years == 0
+
+
+def test_regression_future_and_reversed_dates_handled() -> None:
+    """Future start years and end-before-start years must not inflate experience."""
+    from datetime import date
+    current_year = date.today().year
+    future_start = current_year + 5
+    future_end = current_year + 7
+    resume = f"""Experience
+Junior Dev | Acme | {future_start}-{future_end}
+Dev | Beta | 2022-2020
+Real Dev | Gamma | 2019-2023
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    total = 0
+    for exp in profile.experience:
+        end = exp.end_year if exp.end_year is not None else current_year
+        total += max(0, end - exp.start_year)
+    # Future entry is dropped; reversed entry is clamped to 0 years;
+    # only the genuine 2019-2023 role counts.
+    assert total == 4, f"expected 4 years, got {total}: {profile.experience}"
+
+
+def test_regression_malformed_dates_do_not_inflate_experience() -> None:
+    """Malformed date tokens must not invent experience entries."""
+    resume = """Experience
+Dev | Acme | 20-2024
+"""
+    profile = pipeline.build_candidate_profile(resume)
+    assert profile.experience == [], f"malformed entry must be dropped: {profile.experience}"
+    job = JobProfile(required_skills=["Python"], min_experience_years=10.0)
+    analysis = pipeline.analyze_match(profile, job)
+    assert analysis.candidate_experience_years == 0
